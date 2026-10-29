@@ -1,0 +1,89 @@
+<UserControl x:Class="Unravel.App.Pages.JunkPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <DockPanel Margin="24,20,24,16">
+        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,14">
+            <TextBlock Text="Junk files" Style="{StaticResource PageTitle}"/>
+            <TextBlock Style="{StaticResource Muted}" Margin="0,2,0,0"
+                       Text="Finds temporary and leftover files by name pattern. Files used in the last 24 hours and protected folders are skipped (change in Settings)."/>
+        </StackPanel>
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="260"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Border Style="{StaticResource Card}">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Bottom">
+                        <Button x:Name="ScanButton" Style="{StaticResource PrimaryButton}" Content="Scan" Click="Scan_Click" Margin="0,12,0,0"/>
+                        <Button Style="{StaticResource GhostButton}" Content="Edit patterns and exclusions…" Click="Settings_Click" Margin="0,6,0,0"/>
+                    </StackPanel>
+                    <StackPanel>
+                        <TextBlock Text="Drives" Style="{StaticResource SectionTitle}"/>
+                        <ItemsControl x:Name="DriveList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}" Margin="0,4">
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Label}"/>
+                                            <TextBlock Text="{Binding Detail}" FontSize="11" Foreground="{DynamicResource MutedTextBrush}"/>
+                                        </StackPanel>
+                                    </CheckBox>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Text="Looking for" Style="{StaticResource SectionTitle}" Margin="0,16,0,6"/>
+                        <TextBlock x:Name="PatternSummary" Style="{StaticResource Muted}" FontSize="12"/>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+            <Border Grid.Column="1" Style="{StaticResource Card}" Margin="12,0,0,0" Padding="0">
+                <DockPanel>
+                    <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="12,8">
+                        <DockPanel>
+                            <Button x:Name="DeleteButton" DockPanel.Dock="Right" Style="{StaticResource DangerButton}" Content="Delete checked" Click="Delete_Click" IsEnabled="False"/>
+                            <TextBlock x:Name="ResultSummary" VerticalAlignment="Center" Text="Choose drives and press Scan." Foreground="{DynamicResource MutedTextBrush}"/>
+                        </DockPanel>
+                    </Border>
+                    <Grid>
+                        <DataGrid x:Name="Grid" Background="Transparent" IsReadOnly="False" SelectionMode="Extended" MouseDoubleClick="Grid_DoubleClick">
+                            <DataGrid.Columns>
+                                <DataGridTemplateColumn Width="44" CanUserResize="False">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate><CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Click="Check_Click" HorizontalAlignment="Center"/></DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                                <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="1.2*" IsReadOnly="True" ElementStyle="{StaticResource CellText}"/>
+                                <DataGridTextColumn Header="Folder" Binding="{Binding Folder}" Width="2.5*" IsReadOnly="True" ElementStyle="{StaticResource MutedCellText}"/>
+                                <DataGridTextColumn Header="Size" Binding="{Binding Size, Converter={StaticResource Bytes}}" SortMemberPath="Size" Width="90" IsReadOnly="True" ElementStyle="{StaticResource MutedCellText}"/>
+                                <DataGridTextColumn Header="Pattern" Binding="{Binding Pattern}" Width="80" IsReadOnly="True" ElementStyle="{StaticResource MutedCellText}"/>
+                            </DataGrid.Columns>
+                            <DataGrid.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="Open" Click="Open_Click"/>
+                                    <MenuItem Header="Search on Google for file name" Click="Search_Click"/>
+                                    <MenuItem Header="Open containing folder" Click="Folder_Click"/>
+                                    <MenuItem Header="Properties" Click="Properties_Click"/>
+                                    <Separator/>
+                                    <MenuItem Header="Check all" Click="CheckAll_Click"/>
+                                    <MenuItem Header="Uncheck all" Click="UncheckAll_Click"/>
+                                    <MenuItem Header="Check selected" Click="CheckSelected_Click"/>
+                                    <MenuItem Header="Uncheck selected" Click="UncheckSelected_Click"/>
+                                </ContextMenu>
+                            </DataGrid.ContextMenu>
+                        </DataGrid>
+                        <Border x:Name="ScanOverlay" Background="{DynamicResource SurfaceBrush}" Visibility="Collapsed">
+                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="440">
+                                <TextBlock Text="Scanning…" Style="{StaticResource SectionTitle}" HorizontalAlignment="Center"/>
+                                <ProgressBar IsIndeterminate="True" Margin="0,8"/>
+                                <TextBlock x:Name="ScanFolder" Foreground="{DynamicResource MutedTextBrush}" TextTrimming="CharacterEllipsis" HorizontalAlignment="Center"/>
+                                <TextBlock x:Name="ScanCount" Foreground="{DynamicResource MutedTextBrush}" HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                                <Button Content="Cancel" HorizontalAlignment="Center" Margin="0,14,0,0" Click="Cancel_Click"/>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </DockPanel>
+            </Border>
+        </Grid>
+    </DockPanel>
+</UserControl>

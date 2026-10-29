@@ -1,0 +1,47 @@
+name: Bug report
+description: Something in Unravel doesn't work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: For a safety or security problem (Unravel deleting something it shouldn't), please use **Security → Report a vulnerability** instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Programs
+        2. Uninstall …
+        3. …
+  - type: input
+    id: version
+    attributes:
+      label: Unravel version
+      description: Shown on the About & help page.
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version and build
+      placeholder: Windows 11 23H2 (22631)
+    validations:
+      required: true
+  - type: dropdown
+    id: rights
+    attributes:
+      label: Was Unravel running as administrator?
+      options: ["No", "Yes", "Not sure"]
+  - type: textarea
+    id: log
+    attributes:
+      label: Activity log or error text
+      description: Activity & recovery shows what Unravel did. Remove anything private before pasting.
+      render: text

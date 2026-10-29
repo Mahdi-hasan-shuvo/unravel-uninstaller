@@ -1,0 +1,206 @@
+<UserControl x:Class="Unravel.App.Pages.PerformancePage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <DockPanel Margin="24,20,24,16">
+        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+            <TextBlock Text="Performance" Style="{StaticResource PageTitle}"/>
+            <TextBlock Style="{StaticResource Muted}" Margin="0,2,0,0" Text="See what slows startup, what runs in the background and what fills your disk – and measure the difference your changes make."/>
+        </StackPanel>
+        <Border DockPanel.Dock="Top" Background="{DynamicResource SurfaceAltBrush}" CornerRadius="7" Padding="3" HorizontalAlignment="Left" Margin="0,0,0,10">
+            <StackPanel Orientation="Horizontal">
+                <RadioButton x:Name="TabStartup" Style="{StaticResource Segment}" GroupName="PerfTab" Content="Startup impact" IsChecked="True" Checked="Tab_Checked"/>
+                <RadioButton x:Name="TabProcesses" Style="{StaticResource Segment}" GroupName="PerfTab" Content="Background processes" Checked="Tab_Checked"/>
+                <RadioButton x:Name="TabDisk" Style="{StaticResource Segment}" GroupName="PerfTab" Content="Disk usage" Checked="Tab_Checked"/>
+                <RadioButton x:Name="TabBaselines" Style="{StaticResource Segment}" GroupName="PerfTab" Content="Before &amp; after" Checked="Tab_Checked"/>
+            </StackPanel>
+        </Border>
+
+        <Grid>
+            <!-- Startup impact -->
+            <DockPanel x:Name="StartupPanel">
+                <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Padding="14,10" Margin="0,0,0,10">
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Content="Analyze" Click="AnalyzeStartup_Click" VerticalAlignment="Center"/>
+                        <StackPanel>
+                            <TextBlock x:Name="BootText" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="BootNote" FontSize="12" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap"
+                                       Text="Impact uses Task Manager's thresholds: High = over 1 s of CPU or 3 MB of disk activity at sign-in, Medium = 0.3–1 s or 0.3–3 MB."/>
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+                <Border Style="{StaticResource Card}" Padding="0">
+                    <DataGrid x:Name="StartupGrid" Background="Transparent" IsReadOnly="False" RowHeight="36">
+                        <DataGrid.Columns>
+                            <DataGridTemplateColumn Header="On" Width="56">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <CheckBox Style="{StaticResource Switch}" Margin="0" IsChecked="{Binding Enabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  AutomationProperties.Name="{Binding Name, StringFormat='Start {0} with Windows'}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="1.5*" IsReadOnly="True" ElementStyle="{StaticResource CellText}"/>
+                            <DataGridTemplateColumn Header="Impact" Width="110" SortMemberPath="ImpactOrder">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <Border CornerRadius="8" Padding="8,1" HorizontalAlignment="Left" Background="{Binding ImpactBackground}">
+                                            <TextBlock Text="{Binding ImpactText}" FontSize="12" Foreground="{Binding ImpactForeground}"/>
+                                        </Border>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn Header="CPU time" Binding="{Binding CpuText}" SortMemberPath="CpuMs" Width="90" IsReadOnly="True" ElementStyle="{StaticResource MutedCellText}"/>
+                            <DataGridTextColumn Header="Disk I/O" Binding="{Binding DiskText}" SortMemberPath="DiskBytes" Width="90" IsReadOnly="True" ElementStyle="{StaticResource MutedCellText}"/>
+                            <DataGridTextColumn Header="Memory" Binding="{Binding MemoryText}" SortMemberPath="MemoryBytes" Width="90" IsReadOnly="True" ElementStyle="{StaticResource MutedCellText}"/>
+                            <DataGridTextColumn Header="Starts from" Binding="{Binding Source}" Width="1*" IsReadOnly="True" ElementStyle="{StaticResource MutedCellText}"/>
+                            <DataGridTextColumn Header="Measurement" Binding="{Binding Basis}" Width="1.6*" IsReadOnly="True" ElementStyle="{StaticResource MutedCellText}"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Border>
+            </DockPanel>
+
+            <!-- Background processes -->
+            <DockPanel x:Name="ProcessesPanel" Visibility="Collapsed">
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                    <Button DockPanel.Dock="Right" Content="Refresh" Click="RefreshProcesses_Click" VerticalAlignment="Top"/>
+                    <UniformGrid x:Name="GroupCards" Columns="3" Margin="0,0,12,0"/>
+                </DockPanel>
+                <Border Style="{StaticResource Card}" Padding="0">
+                    <DataGrid x:Name="BgGrid" Background="Transparent" RowHeight="32">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Process" Binding="{Binding Name}" Width="1.4*" ElementStyle="{StaticResource CellText}"/>
+                            <DataGridTextColumn Header="Group" Binding="{Binding Group}" Width="100" ElementStyle="{StaticResource MutedCellText}"/>
+                            <DataGridTextColumn Header="CPU" Binding="{Binding Cpu, StringFormat={}{0:0.0}%}" SortMemberPath="Cpu" Width="70" ElementStyle="{StaticResource CellText}"/>
+                            <DataGridTextColumn Header="Memory" Binding="{Binding Memory, Converter={StaticResource Bytes}}" SortMemberPath="Memory" Width="100" ElementStyle="{StaticResource CellText}"/>
+                            <DataGridTextColumn Header="Running since" Binding="{Binding Started, StringFormat=g}" Width="140" ElementStyle="{StaticResource MutedCellText}"/>
+                            <DataGridTextColumn Header="Location" Binding="{Binding Path}" Width="2*" ElementStyle="{StaticResource MutedCellText}"/>
+                        </DataGrid.Columns>
+                        <DataGrid.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="End process…" Click="EndBg_Click"/>
+                                <MenuItem Header="Open file location" Click="OpenBg_Click"/>
+                                <MenuItem Header="Search online" Click="SearchBg_Click"/>
+                            </ContextMenu>
+                        </DataGrid.ContextMenu>
+                    </DataGrid>
+                </Border>
+            </DockPanel>
+
+            <!-- Disk usage -->
+            <DockPanel x:Name="DiskPanel" Visibility="Collapsed">
+                <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Padding="8" Margin="0,0,0,10">
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                            <Button x:Name="DiskScanButton" Style="{StaticResource PrimaryButton}" Content="Scan" Click="DiskScan_Click" Margin="0,0,8,0"/>
+                            <Button x:Name="DiskCancelButton" Content="Cancel" Click="DiskCancel_Click" IsEnabled="False"/>
+                        </StackPanel>
+                        <Button DockPanel.Dock="Right" Content="Choose folder…" Click="ChooseFolder_Click" Margin="8,0"/>
+                        <ComboBox x:Name="DriveBox" Width="280" HorizontalAlignment="Left"/>
+                    </DockPanel>
+                </Border>
+                <TextBlock x:Name="DiskStatus" DockPanel.Dock="Top" Foreground="{DynamicResource MutedTextBrush}" Margin="2,0,0,8" TextTrimming="CharacterEllipsis"/>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.2*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Style="{StaticResource Card}" Padding="8">
+                        <TreeView x:Name="FolderTree">
+                            <TreeView.ItemTemplate>
+                                <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                                    <Grid Width="420">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="90"/>
+                                            <ColumnDefinition Width="80"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Path}"/>
+                                        <ProgressBar Grid.Column="1" Value="{Binding Share, Mode=OneWay}" Maximum="1" Height="6" Margin="6,0"/>
+                                        <TextBlock Grid.Column="2" Text="{Binding SizeText}" TextAlignment="Right" Foreground="{DynamicResource MutedTextBrush}"/>
+                                    </Grid>
+                                </HierarchicalDataTemplate>
+                            </TreeView.ItemTemplate>
+                            <TreeView.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="Open folder" Click="OpenTreeFolder_Click"/>
+                                </ContextMenu>
+                            </TreeView.ContextMenu>
+                        </TreeView>
+                    </Border>
+                    <Border Grid.Column="1" Style="{StaticResource Card}" Padding="0" Margin="12,0,0,0">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Top" Text="Largest files" Style="{StaticResource SectionTitle}" Margin="14,10,0,4"/>
+                            <DataGrid x:Name="LargeGrid" Background="Transparent" RowHeight="30">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="File" Binding="{Binding Path}" Width="3*" ElementStyle="{StaticResource CellText}"/>
+                                    <DataGridTextColumn Header="Size" Binding="{Binding Size, Converter={StaticResource Bytes}}" SortMemberPath="Size" Width="90" ElementStyle="{StaticResource MutedCellText}"/>
+                                </DataGrid.Columns>
+                                <DataGrid.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Open containing folder" Click="OpenLarge_Click"/>
+                                        <MenuItem Header="Move to Recycle Bin…" Click="RecycleLarge_Click"/>
+                                    </ContextMenu>
+                                </DataGrid.ContextMenu>
+                            </DataGrid>
+                        </DockPanel>
+                    </Border>
+                </Grid>
+            </DockPanel>
+
+            <!-- Baselines -->
+            <DockPanel x:Name="BaselinePanel" Visibility="Collapsed">
+                <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Padding="14,10" Margin="0,0,0,10">
+                    <StackPanel>
+                        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource MutedTextBrush}"
+                                   Text="Capture a baseline before a change (e.g. disabling startup items or uninstalling software), restart if needed, then capture another one and compare. Each capture measures CPU for 15 seconds while you leave the PC idle."/>
+                        <DockPanel Margin="0,10,0,0">
+                            <Button x:Name="CaptureButton" DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Content="Capture baseline" Click="Capture_Click" Margin="8,0,0,0"/>
+                            <TextBox x:Name="BaselineLabel" Tag="Label, e.g. Before disabling startup apps"/>
+                        </DockPanel>
+                        <TextBlock x:Name="CaptureStatus" Margin="0,6,0,0" FontSize="12" Foreground="{DynamicResource MutedTextBrush}"/>
+                    </StackPanel>
+                </Border>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="340"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Style="{StaticResource Card}" Padding="8">
+                        <DockPanel>
+                            <DockPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+                                <Button DockPanel.Dock="Right" Content="Delete" Style="{StaticResource GhostButton}" Click="DeleteBaseline_Click"/>
+                                <Button Style="{StaticResource PrimaryButton}" Content="Compare selected two" Click="Compare_Click" HorizontalAlignment="Left"/>
+                            </DockPanel>
+                            <ListBox x:Name="BaselineList" SelectionMode="Multiple">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="6,4">
+                                            <TextBlock Text="{Binding Label}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding Captured, StringFormat=g}" FontSize="11.5" Foreground="{DynamicResource MutedTextBrush}"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+                    </Border>
+                    <Border Grid.Column="1" Style="{StaticResource Card}" Padding="0" Margin="12,0,0,0">
+                        <DataGrid x:Name="CompareGrid" Background="Transparent" RowHeight="32">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Measure" Binding="{Binding Metric}" Width="1.4*" ElementStyle="{StaticResource CellText}"/>
+                                <DataGridTextColumn Header="Before" Binding="{Binding Before}" Width="1*" ElementStyle="{StaticResource MutedCellText}"/>
+                                <DataGridTextColumn Header="After" Binding="{Binding After}" Width="1*" ElementStyle="{StaticResource CellText}"/>
+                                <DataGridTemplateColumn Header="Change" Width="1.2*">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Text}" Foreground="{Binding Brush}" FontWeight="SemiBold"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Border>
+                </Grid>
+            </DockPanel>
+        </Grid>
+    </DockPanel>
+</UserControl>

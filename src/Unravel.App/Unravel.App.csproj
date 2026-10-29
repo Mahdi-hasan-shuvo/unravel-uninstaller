@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>Unravel</AssemblyName>
+    <RootNamespace>Unravel.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>unravel.ico</ApplicationIcon>
+    <Version>1.0.0</Version>
+    <Product>Unravel</Product>
+    <Description>Uninstaller and system clean-up toolkit</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Unravel.Core\Unravel.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="unravel.ico" />
+    <Resource Include="unravel.png" />
+  </ItemGroup>
+</Project>

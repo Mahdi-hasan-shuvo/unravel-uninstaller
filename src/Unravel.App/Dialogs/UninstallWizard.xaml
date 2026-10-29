@@ -1,0 +1,224 @@
+<Window x:Class="Unravel.App.Dialogs.UninstallWizard"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:lo="clr-namespace:Unravel.Core.Leftovers;assembly=Unravel.Core"
+        Title="Uninstall" Width="900" Height="680" MinWidth="720" MinHeight="520"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="True" Icon="/unravel.ico"
+        Background="{DynamicResource WindowBrush}" FontFamily="{StaticResource UiFont}" FontSize="13"
+        Foreground="{DynamicResource TextBrush}" TextOptions.TextFormattingMode="Display">
+    <Window.Resources>
+        <HierarchicalDataTemplate DataType="{x:Type lo:LeftoverNode}" ItemsSource="{Binding Children}">
+            <StackPanel Orientation="Horizontal" ToolTip="{Binding Reason}">
+                <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}" Margin="0,0,6,0" VerticalAlignment="Center" Focusable="False"/>
+                <TextBlock Style="{StaticResource Icon}" FontSize="13" Margin="0,0,6,0" Text="{Binding Kind, Converter={StaticResource LeftoverGlyph}}"
+                           Foreground="{DynamicResource FaintTextBrush}"/>
+                <TextBlock Text="{Binding DisplayName}" FontWeight="{Binding IsCreated, Converter={StaticResource LeftoverWeight}}"
+                           Foreground="{Binding State, Converter={StaticResource LeftoverBrush}}" VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding ValueData, StringFormat=' = {0}'}" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center"
+                           MaxWidth="360" TextTrimming="CharacterEllipsis" Visibility="{Binding ValueData, Converter={StaticResource NullToCollapsed}}"/>
+                <TextBlock Text="{Binding Note, StringFormat='  ({0})'}" Foreground="{DynamicResource WarningBrush}" FontSize="12" VerticalAlignment="Center"
+                           Visibility="{Binding Note, Converter={StaticResource NullToCollapsed}}"/>
+                <Border CornerRadius="8" Padding="7,0" Margin="8,0,0,0" VerticalAlignment="Center" ToolTip="{Binding Safety.Explanation}"
+                        Background="{Binding ConfidenceText, Converter={StaticResource ConfidenceBrush}, ConverterParameter=bg}"
+                        Visibility="{Binding ConfidenceText, Converter={StaticResource NullToCollapsed}}">
+                    <TextBlock Text="{Binding ConfidenceText}" FontSize="11" Foreground="{Binding ConfidenceText, Converter={StaticResource ConfidenceBrush}}"/>
+                </Border>
+            </StackPanel>
+        </HierarchicalDataTemplate>
+        <Style x:Key="TreeItemExpanded" TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
+            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
+        </Style>
+    </Window.Resources>
+
+    <DockPanel>
+        <!-- Header with program and stepper -->
+        <Border DockPanel.Dock="Top" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="24,18">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" x:Name="Stepper"/>
+                <StackPanel Orientation="Horizontal">
+                    <Image x:Name="ProgramIcon" Width="36" Height="36" Margin="0,0,14,0" RenderOptions.BitmapScalingMode="HighQuality"/>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock x:Name="ProgramName" FontSize="17" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" MaxWidth="420"/>
+                        <TextBlock x:Name="ProgramPublisher" Foreground="{DynamicResource MutedTextBrush}"/>
+                    </StackPanel>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- Footer -->
+        <Border DockPanel.Dock="Bottom" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="24,12">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button x:Name="BackButton" Content="Back" MinWidth="90" Margin="0,0,8,0" Click="Back_Click"/>
+                    <Button x:Name="NextButton" Style="{StaticResource PrimaryButton}" Content="Next" MinWidth="110" Margin="0,0,8,0" Click="Next_Click"/>
+                    <Button x:Name="CloseButton" Content="Close" MinWidth="90" Click="Close_Click"/>
+                </StackPanel>
+                <TextBlock x:Name="FooterText" VerticalAlignment="Center" Foreground="{DynamicResource MutedTextBrush}" TextTrimming="CharacterEllipsis"/>
+            </DockPanel>
+        </Border>
+
+        <Grid Margin="24,18,24,16">
+            <!-- Step 1: built-in uninstaller -->
+            <DockPanel x:Name="StepUninstall">
+                <TextBlock DockPanel.Dock="Top" Text="Running the program's own uninstaller" Style="{StaticResource SectionTitle}" FontSize="16"/>
+                <TextBlock DockPanel.Dock="Top" Style="{StaticResource Muted}" Margin="0,0,0,12"
+                           Text="Follow the uninstaller's instructions. It may open behind this window – use Alt+Tab if you don't see it. When it is done, choose how thoroughly to look for leftovers."/>
+                <Border x:Name="WaitCard" DockPanel.Dock="Bottom" Style="{StaticResource Card}" Margin="0,12,0,0" Visibility="Collapsed">
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Content="The uninstaller has finished" Click="SkipWait_Click"/>
+                        <ProgressBar DockPanel.Dock="Bottom" IsIndeterminate="True" Margin="0,10,16,0"/>
+                        <TextBlock Text="Waiting for the uninstaller to finish…" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    </DockPanel>
+                </Border>
+                <Border x:Name="ModeCard" DockPanel.Dock="Bottom" Style="{StaticResource Card}" Margin="0,12,0,0" Visibility="Collapsed">
+                    <StackPanel>
+                        <TextBlock Text="Scan for leftovers" Style="{StaticResource SectionTitle}"/>
+                        <RadioButton x:Name="ModeSafe" GroupName="Mode">
+                            <TextBlock TextWrapping="Wrap"><Run Text="Safe" FontWeight="SemiBold"/><Run Text="  – only places that clearly belong to the program: its install folder, its own registry keys and shortcuts. Fastest." Foreground="{DynamicResource MutedTextBrush}"/></TextBlock>
+                        </RadioButton>
+                        <RadioButton x:Name="ModeModerate" GroupName="Mode">
+                            <TextBlock TextWrapping="Wrap"><Run Text="Moderate" FontWeight="SemiBold"/><Run Text="  – Safe, plus app data folders, startup entries, services, firewall rules and file associations. Recommended." Foreground="{DynamicResource MutedTextBrush}"/></TextBlock>
+                        </RadioButton>
+                        <RadioButton x:Name="ModeAdvanced" GroupName="Mode">
+                            <TextBlock TextWrapping="Wrap"><Run Text="Advanced" FontWeight="SemiBold"/><Run Text="  – Moderate, plus a deep name search and COM registrations. Slowest; review results carefully." Foreground="{DynamicResource MutedTextBrush}"/></TextBlock>
+                        </RadioButton>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource Card}" Padding="8">
+                    <ItemsControl x:Name="LogList">
+                        <ItemsControl.Template>
+                            <ControlTemplate><ScrollViewer VerticalScrollBarVisibility="Auto"><ItemsPresenter/></ScrollViewer></ControlTemplate>
+                        </ItemsControl.Template>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal" Margin="6,5">
+                                    <TextBlock Style="{StaticResource Icon}" Text="{Binding Glyph}" Foreground="{Binding Brush}" FontSize="14" Margin="0,0,10,0" VerticalAlignment="Top"/>
+                                    <TextBlock Text="{Binding Text}" TextWrapping="Wrap" MaxWidth="760"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Border>
+            </DockPanel>
+
+            <!-- Step 2: scanning -->
+            <StackPanel x:Name="StepScan" Visibility="Collapsed" VerticalAlignment="Center" HorizontalAlignment="Center" Width="420">
+                <TextBlock Text="Looking for leftovers" Style="{StaticResource SectionTitle}" FontSize="16" HorizontalAlignment="Center"/>
+                <ProgressBar IsIndeterminate="True" Margin="0,12"/>
+                <TextBlock x:Name="ScanStatus" Foreground="{DynamicResource MutedTextBrush}" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                <Button Content="Cancel scan" HorizontalAlignment="Center" Margin="0,18,0,0" Click="CancelScan_Click"/>
+            </StackPanel>
+
+            <!-- Step 3: registry leftovers -->
+            <DockPanel x:Name="StepRegistry" Visibility="Collapsed">
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <Button x:Name="RegSelectAllButton" Style="{StaticResource ToolButton}" Content="Select recommended" Click="RegSelectAll_Click" ToolTip="Selects high- and medium-confidence items without risk flags. Low-confidence items must be checked one by one."/>
+                        <Button x:Name="RegDeselectAllButton" Style="{StaticResource ToolButton}" Content="Deselect all" Click="RegDeselectAll_Click"/>
+                        <Button x:Name="RegDeleteButton" Style="{StaticResource DangerButton}" Content="Delete selected" Margin="6,0,0,0" Click="RegDelete_Click"/>
+                    </StackPanel>
+                    <StackPanel>
+                        <TextBlock x:Name="RegistryTitle" Style="{StaticResource SectionTitle}" FontSize="16" Margin="0"/>
+                        <TextBlock Style="{StaticResource Muted}" Text="Only checked items in bold are deleted. Badges show how sure Unravel is that an item belongs to the program; system-critical items are blocked. A backup is saved first."/>
+                    </StackPanel>
+                </DockPanel>
+                <Border Style="{StaticResource Card}" Padding="8">
+                    <TreeView x:Name="RegistryTree" ItemContainerStyle="{StaticResource TreeItemExpanded}">
+                        <TreeView.Resources>
+                            <Style TargetType="TreeViewItem" BasedOn="{StaticResource TreeItemExpanded}"/>
+                        </TreeView.Resources>
+                        <TreeView.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Expand all" Click="ExpandAll_Click"/>
+                                <MenuItem Header="Collapse all" Click="CollapseAll_Click"/>
+                                <MenuItem Header="Expand selected" Click="ExpandSelected_Click"/>
+                                <MenuItem Header="Collapse selected" Click="CollapseSelected_Click"/>
+                                <Separator/>
+                                <MenuItem Header="Delete selected item now…" Click="DeleteSelectedKey_Click"/>
+                                <MenuItem Header="Mark as created by the program" Click="MarkCreated_Click"/>
+                                <MenuItem Header="Add to exclude list" Click="ExcludeKey_Click"/>
+                                <MenuItem Header="Open in Registry Editor" Click="OpenKey_Click"/>
+                                <Separator/>
+                                <MenuItem Header="Export all to HTML…" Click="Export_Click"/>
+                            </ContextMenu>
+                        </TreeView.ContextMenu>
+                    </TreeView>
+                </Border>
+            </DockPanel>
+
+            <!-- Step 4: file leftovers -->
+            <DockPanel x:Name="StepFiles" Visibility="Collapsed">
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <Button x:Name="FileSelectAllButton" Style="{StaticResource ToolButton}" Content="Select recommended" Click="FileSelectAll_Click" ToolTip="Selects high- and medium-confidence items without risk flags. Low-confidence items must be checked one by one."/>
+                        <Button x:Name="FileDeselectAllButton" Style="{StaticResource ToolButton}" Content="Deselect all" Click="FileDeselectAll_Click"/>
+                        <Button x:Name="FileDeleteButton" Style="{StaticResource DangerButton}" Content="Delete selected" Margin="6,0,0,0" Click="FileDelete_Click"/>
+                    </StackPanel>
+                    <StackPanel>
+                        <TextBlock x:Name="FilesTitle" Style="{StaticResource SectionTitle}" FontSize="16" Margin="0"/>
+                        <TextBlock x:Name="FilesHint" Style="{StaticResource Muted}"/>
+                    </StackPanel>
+                </DockPanel>
+                <Border Style="{StaticResource Card}" Padding="0">
+                    <DataGrid x:Name="FilesGrid" IsReadOnly="False" SelectionMode="Extended" Background="Transparent" MouseDoubleClick="FilesGrid_DoubleClick">
+                        <DataGrid.Columns>
+                            <DataGridTemplateColumn Width="44" CanUserResize="False">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate><CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" HorizontalAlignment="Center"/></DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Header="Location" Width="3*" SortMemberPath="FsPath">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal" ToolTip="{Binding FsPath}">
+                                            <TextBlock Style="{StaticResource Icon}" FontSize="14" Margin="0,0,8,0" Foreground="{DynamicResource WarningBrush}"
+                                                       Text="{Binding Kind, Converter={StaticResource LeftoverGlyph}}"/>
+                                            <TextBlock Text="{Binding FsPath}" Style="{StaticResource CellText}" FontWeight="{Binding IsCreated, Converter={StaticResource LeftoverWeight}}"
+                                                       Foreground="{Binding State, Converter={StaticResource LeftoverBrush}}"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Header="Confidence" Width="100" SortMemberPath="ConfidenceText">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <Border CornerRadius="8" Padding="8,1" HorizontalAlignment="Left" ToolTip="{Binding Safety.Explanation}"
+                                                Background="{Binding ConfidenceText, Converter={StaticResource ConfidenceBrush}, ConverterParameter=bg}">
+                                            <TextBlock Text="{Binding ConfidenceText}" FontSize="12" Foreground="{Binding ConfidenceText, Converter={StaticResource ConfidenceBrush}}"/>
+                                        </Border>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn Header="Size" Binding="{Binding Size, Converter={StaticResource Bytes}}" SortMemberPath="Size" Width="90" IsReadOnly="True" ElementStyle="{StaticResource MutedCellText}"/>
+                            <DataGridTextColumn Header="Why it was found" Binding="{Binding Reason}" Width="1.6*" IsReadOnly="True" ElementStyle="{StaticResource MutedCellText}"/>
+                        </DataGrid.Columns>
+                        <DataGrid.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Open" Click="FileOpen_Click"/>
+                                <MenuItem Header="Open containing folder" Click="FileFolder_Click"/>
+                                <MenuItem Header="Properties" Click="FileProperties_Click"/>
+                                <Separator/>
+                                <MenuItem Header="Check selected" Click="FileCheckSelected_Click"/>
+                                <MenuItem Header="Uncheck selected" Click="FileUncheckSelected_Click"/>
+                                <MenuItem Header="Add folder to exclude list" Click="FileExclude_Click"/>
+                                <Separator/>
+                                <MenuItem Header="Export to HTML…" Click="Export_Click"/>
+                            </ContextMenu>
+                        </DataGrid.ContextMenu>
+                    </DataGrid>
+                </Border>
+            </DockPanel>
+
+            <!-- Step 5: summary -->
+            <StackPanel x:Name="StepDone" Visibility="Collapsed" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="560">
+                <Border Width="64" Height="64" CornerRadius="32" Background="{DynamicResource SuccessSoftBrush}" HorizontalAlignment="Center">
+                    <TextBlock x:Name="DoneGlyph" Style="{StaticResource Icon}" Text="&#xE73E;" FontSize="28" Foreground="{DynamicResource SuccessBrush}"/>
+                </Border>
+                <TextBlock x:Name="DoneTitle" FontSize="20" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,16,0,8" TextAlignment="Center" TextWrapping="Wrap"/>
+                <TextBlock x:Name="DoneText" Style="{StaticResource Muted}" TextAlignment="Center"/>
+                <Button x:Name="OpenBackupButton" Content="Open backup folder" HorizontalAlignment="Center" Margin="0,16,0,0" Click="OpenBackup_Click" Visibility="Collapsed"/>
+            </StackPanel>
+        </Grid>
+    </DockPanel>
+</Window>
+

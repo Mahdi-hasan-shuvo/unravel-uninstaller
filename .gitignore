@@ -1,0 +1,10 @@
+bin/
+obj/
+publish/
+tests/TestResults/
+tests/e2e/out/
+*.user
+.vs/
+publis/
+.code-review-graph/
+*.e2e-backup
