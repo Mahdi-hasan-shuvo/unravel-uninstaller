@@ -180,8 +180,8 @@ flowchart TB
 
 ## 🚀 Quick start
 
-1. **Download** the latest `Unravel-*.zip` from [Releases](https://github.com/Mahdi-hasan-shuvo/unravel-uninstaller/releases/latest).
-2. **Extract** it anywhere and run `Unravel.exe`. No installer needed.
+1. **Download** [`Unravel-1.0.0-win-x64.exe`](https://github.com/Mahdi-hasan-shuvo/unravel-uninstaller/releases/latest/download/Unravel-1.0.0-win-x64.exe) from [Releases](https://github.com/Mahdi-hasan-shuvo/unravel-uninstaller/releases/latest). A zip of the same app is there too.
+2. **Double-click** it. No installer and no .NET install needed; it's a single self-contained file.
 3. Pick a program, press **Uninstall**, choose a scan mode and review the leftovers.
 
 > [!TIP]
