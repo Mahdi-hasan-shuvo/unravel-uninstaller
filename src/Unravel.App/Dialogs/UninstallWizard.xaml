@@ -210,14 +210,63 @@
             </DockPanel>
 
             <!-- Step 5: summary -->
-            <StackPanel x:Name="StepDone" Visibility="Collapsed" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="560">
-                <Border Width="64" Height="64" CornerRadius="32" Background="{DynamicResource SuccessSoftBrush}" HorizontalAlignment="Center">
-                    <TextBlock x:Name="DoneGlyph" Style="{StaticResource Icon}" Text="&#xE73E;" FontSize="28" Foreground="{DynamicResource SuccessBrush}"/>
+            <DockPanel x:Name="StepDone" Visibility="Collapsed">
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,14">
+                    <Border DockPanel.Dock="Left" x:Name="DoneBadge" Width="52" Height="52" CornerRadius="26" Background="{DynamicResource SuccessSoftBrush}" Margin="0,0,16,0" VerticalAlignment="Top">
+                        <TextBlock x:Name="DoneGlyph" Style="{StaticResource Icon}" Text="&#xE73E;" FontSize="24" Foreground="{DynamicResource SuccessBrush}"/>
+                    </Border>
+                    <Button DockPanel.Dock="Right" x:Name="OpenBackupButton" Content="Open backup folder" VerticalAlignment="Top" Click="OpenBackup_Click" Visibility="Collapsed"/>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock x:Name="DoneTitle" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                        <TextBlock x:Name="DoneText" Style="{StaticResource Muted}" Margin="0,4,0,0"/>
+                    </StackPanel>
+                </DockPanel>
+                <!-- Post-uninstall verification: everything is looked up again, nothing is taken from the deletion reports. -->
+                <Border x:Name="VerifyCard" Style="{StaticResource Card}" Padding="0" Visibility="Collapsed">
+                    <DockPanel>
+                        <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="16,12">
+                            <DockPanel>
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Button x:Name="VerifyAgainButton" Content="Verify again" Style="{StaticResource GhostButton}" Margin="0,0,6,0" Click="VerifyAgain_Click"/>
+                                    <Button x:Name="ScanAgainButton" Content="Scan again" Click="ScanAgain_Click"
+                                            ToolTip="Run the leftover scan again to review and delete what is still there."/>
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Border x:Name="VerdictPill" CornerRadius="10" Padding="10,3" Background="{DynamicResource AccentSoftBrush}" VerticalAlignment="Center">
+                                        <TextBlock x:Name="VerdictText" FontWeight="SemiBold" FontSize="12" Text="Verifying…"/>
+                                    </Border>
+                                    <TextBlock x:Name="VerifySummary" Margin="12,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource MutedTextBrush}" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+                        <ProgressBar x:Name="VerifyProgress" DockPanel.Dock="Top" IsIndeterminate="True" Height="3" Margin="0" Visibility="Collapsed"/>
+                        <ListBox x:Name="VerifyList" BorderThickness="0" Background="Transparent" Padding="6"
+                                 VirtualizingPanel.IsVirtualizing="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <DockPanel Margin="4,3" ToolTip="{Binding Location}">
+                                        <TextBlock DockPanel.Dock="Left" Style="{StaticResource Icon}" FontSize="14" Width="22" Margin="0,1,8,0" VerticalAlignment="Top"
+                                                   Text="{Binding Glyph}" Foreground="{Binding Brush}"/>
+                                        <TextBlock DockPanel.Dock="Right" Text="{Binding StatusText}" Foreground="{Binding Brush}" FontSize="12" Margin="12,1,4,0" VerticalAlignment="Top"/>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Location}" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Text="{Binding Detail}" FontSize="11.5" Foreground="{DynamicResource MutedTextBrush}" TextTrimming="CharacterEllipsis"/>
+                                        </StackPanel>
+                                    </DockPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </DockPanel>
                 </Border>
-                <TextBlock x:Name="DoneTitle" FontSize="20" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,16,0,8" TextAlignment="Center" TextWrapping="Wrap"/>
-                <TextBlock x:Name="DoneText" Style="{StaticResource Muted}" TextAlignment="Center"/>
-                <Button x:Name="OpenBackupButton" Content="Open backup folder" HorizontalAlignment="Center" Margin="0,16,0,0" Click="OpenBackup_Click" Visibility="Collapsed"/>
-            </StackPanel>
+            </DockPanel>
+
+            <!-- Shown while deletions run in the background, so the window stays responsive. -->
+            <Border x:Name="BusyOverlay" Background="{DynamicResource WindowBrush}" Opacity="0.94" Visibility="Collapsed">
+                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="380">
+                    <TextBlock x:Name="BusyText" Style="{StaticResource SectionTitle}" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"/>
+                    <ProgressBar IsIndeterminate="True" Margin="0,10,0,0"/>
+                </StackPanel>
+            </Border>
         </Grid>
     </DockPanel>
 </Window>

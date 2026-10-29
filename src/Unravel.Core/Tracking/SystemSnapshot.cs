@@ -110,8 +110,20 @@ public sealed class SystemSnapshot
     public static SystemSnapshot Capture(SnapshotOptions o, string label, IProgress<SnapshotProgress>? progress = null, CancellationToken ct = default)
     {
         var s = new SystemSnapshot { Label = label, Taken = DateTime.Now };
-        foreach (var root in o.FileRoots) CaptureFiles(s, root, o, progress, ct);
-        foreach (var root in o.RegistryRoots) CaptureRegistry(s, root, o, progress, ct);
+        // Files and registry are walked at the same time, each by several workers; progress is throttled to 5 per second.
+        long visited = 0, lastReport = 0;
+        void Report(string area, string current)
+        {
+            var n = Interlocked.Increment(ref visited);
+            var now = Environment.TickCount64;
+            var prev = Interlocked.Read(ref lastReport);
+            if (now - prev > 200 && Interlocked.CompareExchange(ref lastReport, now, prev) == prev)
+                progress?.Report(new(area, (int)n, current));
+        }
+        var files = Task.Run(() => CaptureFiles(s, o.FileRoots, o, Report, ct), ct);
+        var registry = Task.Run(() => CaptureRegistry(s, o.RegistryRoots, o, Report, ct), ct);
+        try { Task.WaitAll(files, registry); }
+        catch (AggregateException e) when (e.InnerExceptions.All(x => x is OperationCanceledException)) { }
         ct.ThrowIfCancellationRequested();
         if (o.Services)
         {
@@ -151,50 +163,55 @@ public sealed class SystemSnapshot
         return s;
     }
 
-    private static void CaptureFiles(SystemSnapshot s, string root, SnapshotOptions o, IProgress<SnapshotProgress>? progress, CancellationToken ct)
+    private static void CaptureFiles(SystemSnapshot s, IReadOnlyList<string> roots, SnapshotOptions o, Action<string, string> report, CancellationToken ct)
     {
-        if (!Directory.Exists(root)) return;
         var noise = new PathFilter(o.FileNoise);
-        var stack = new Stack<string>();
-        stack.Push(root);
-        var last = DateTime.MinValue;
-        while (stack.Count > 0)
+        var results = new System.Collections.Concurrent.ConcurrentBag<Dictionary<string, FileRecord>>();
+        // Folders are handed out to several workers: one root (Program Files, AppData) no longer holds up the others.
+        ParallelWalk(roots.Where(Directory.Exists), ct, (dir, push) =>
         {
-            ct.ThrowIfCancellationRequested();
-            var dir = stack.Pop();
             IEnumerable<FileSystemInfo> entries;
             try { entries = new DirectoryInfo(dir).EnumerateFileSystemInfos("*", new EnumerationOptions { IgnoreInaccessible = true, AttributesToSkip = 0 }).ToList(); }
-            catch { continue; }
+            catch { return null; }
+            var local = new Dictionary<string, FileRecord>(StringComparer.OrdinalIgnoreCase);
             foreach (var e in entries)
             {
                 if ((e.Attributes & FileAttributes.ReparsePoint) != 0) continue;
                 if (noise.IsMatch(e.FullName)) continue;
                 if (e is DirectoryInfo d)
                 {
-                    s.Files[d.FullName] = new FileRecord(0, 0, true);
-                    stack.Push(d.FullName);
+                    local[d.FullName] = new FileRecord(0, 0, true);
+                    push(d.FullName);
                 }
                 else if (e is FileInfo f)
                 {
-                    try { s.Files[f.FullName] = new FileRecord(f.Length, f.LastWriteTimeUtc.Ticks, false); } catch { }
+                    try { local[f.FullName] = new FileRecord(f.Length, f.LastWriteTimeUtc.Ticks, false); } catch { }
                 }
             }
-            if ((DateTime.UtcNow - last).TotalMilliseconds > 200) { progress?.Report(new("Files", s.ItemCount, dir)); last = DateTime.UtcNow; }
-        }
+            report("Files", dir);
+            return local;
+        }, results);
+        foreach (var part in results) foreach (var (k, v) in part) s.Files[k] = v;
     }
 
-    private static void CaptureRegistry(SystemSnapshot s, RegPath root, SnapshotOptions o, IProgress<SnapshotProgress>? progress, CancellationToken ct)
+    private static void CaptureRegistry(SystemSnapshot s, IReadOnlyList<RegPath> roots, SnapshotOptions o, Action<string, string> report, CancellationToken ct)
     {
-        using var rk = root.Open();
-        if (rk is null) { s.Warnings.Add("Registry root not readable: " + root.FullPath); return; }
-        var last = DateTime.MinValue;
         var noise = new PathFilter(o.RegistryNoise);
-        Walk(rk, root.FullPath);
-
-        void Walk(RegistryKey key, string path)
+        var results = new System.Collections.Concurrent.ConcurrentBag<Dictionary<string, Dictionary<string, ulong>>>();
+        var readable = new List<string>();
+        foreach (var root in roots)
         {
-            ct.ThrowIfCancellationRequested();
-            if (noise.IsMatch(path)) return;
+            using var rk = root.Open();
+            if (rk is null) s.Warnings.Add("Registry root not readable: " + root.FullPath);
+            else readable.Add(root.FullPath);
+        }
+        // Each work item is one key path; the key is opened by its worker, so no handle is shared between threads.
+        ParallelWalk(readable, ct, (path, push) =>
+        {
+            if (noise.IsMatch(path)) return null;
+            if (!RegPath.TryParse(path, out var rp) || rp is null) return null;
+            using var key = rp.Open();
+            if (key is null) return null;
             var values = new Dictionary<string, ulong>(StringComparer.OrdinalIgnoreCase);
             try
             {
@@ -205,18 +222,51 @@ public sealed class SystemSnapshot
                 }
             }
             catch { }
-            s.Registry[path] = values;
-            if ((DateTime.UtcNow - last).TotalMilliseconds > 200) { progress?.Report(new("Registry", s.ItemCount, path)); last = DateTime.UtcNow; }
-            string[] subs;
-            try { subs = key.GetSubKeyNames(); } catch { return; }
-            foreach (var sub in subs)
+            try { foreach (var sub in key.GetSubKeyNames()) push(path + "\\" + sub); } catch { }
+            report("Registry", path);
+            return new Dictionary<string, Dictionary<string, ulong>>(StringComparer.OrdinalIgnoreCase) { [path] = values };
+        }, results);
+        foreach (var part in results) foreach (var (k, v) in part) s.Registry[k] = v;
+    }
+
+    /// <summary>
+    /// Breadth-agnostic parallel tree walk. <paramref name="visit"/> processes one node, pushes its children and returns
+    /// what it recorded; results are batched per worker so the shared state is touched rarely.
+    /// </summary>
+    private static void ParallelWalk<T>(IEnumerable<string> roots, CancellationToken ct, Func<string, Action<string>, Dictionary<string, T>?> visit,
+        System.Collections.Concurrent.ConcurrentBag<Dictionary<string, T>> results)
+    {
+        var work = new System.Collections.Concurrent.ConcurrentStack<string>();
+        int pending = 0;
+        foreach (var r in roots) { Interlocked.Increment(ref pending); work.Push(r); }
+        void Push(string child) { Interlocked.Increment(ref pending); work.Push(child); }
+        int workers = Math.Clamp(Environment.ProcessorCount, 2, 8);
+        var threads = new Task[workers];
+        for (int i = 0; i < workers; i++)
+        {
+            threads[i] = Task.Factory.StartNew(() =>
             {
-                RegistryKey? child = null;
-                try { child = key.OpenSubKey(sub); } catch { }
-                if (child is null) continue;
-                using (child) Walk(child, path + "\\" + sub);
-            }
+                var batch = new Dictionary<string, T>(StringComparer.OrdinalIgnoreCase);
+                var spin = new SpinWait();
+                while (Volatile.Read(ref pending) > 0)
+                {
+                    if (ct.IsCancellationRequested) break;
+                    if (!work.TryPop(out var node)) { spin.SpinOnce(); continue; }
+                    spin.Reset();
+                    try
+                    {
+                        if (visit(node, Push) is { } part)
+                            foreach (var (k, v) in part) batch[k] = v;
+                    }
+                    finally { Interlocked.Decrement(ref pending); }
+                    if (batch.Count >= 20_000) { results.Add(batch); batch = new(StringComparer.OrdinalIgnoreCase); }
+                }
+                results.Add(batch);
+            }, ct, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         }
+        try { Task.WaitAll(threads); }
+        catch (AggregateException e) when (e.InnerExceptions.All(x => x is OperationCanceledException)) { }
+        ct.ThrowIfCancellationRequested();
     }
 
     internal static ulong HashValue(RegistryValueKind kind, object? value)

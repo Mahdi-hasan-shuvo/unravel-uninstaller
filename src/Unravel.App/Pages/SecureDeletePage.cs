@@ -68,7 +68,7 @@ public sealed class SecureDeletePage : UserControl, IPage
         right.Children.Add(_cancel);
         DockPanel.SetDock(right, Dock.Right);
         bar.Children.Add(right);
-        var left = new StackPanel { Orientation = Orientation.Horizontal };
+        var left = new WrapPanel { Orientation = Orientation.Horizontal };   // wraps instead of sliding under the right-hand controls
         left.Children.Add(addFiles);
         left.Children.Add(addFolder);
         left.Children.Add(remove);

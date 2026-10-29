@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Windows;
 using System.Windows.Data;
 using Unravel.Core.Leftovers;
@@ -17,6 +17,18 @@ public sealed class NullToCollapsedConverter : IValueConverter
     public object Convert(object? value, Type t, object p, CultureInfo c) =>
         value is null || value is string s && string.IsNullOrWhiteSpace(s) ? Visibility.Collapsed : Visibility.Visible;
     public object ConvertBack(object value, Type t, object p, CultureInfo c) => throw new NotSupportedException();
+}
+
+/// <summary>Shows the first line of a multi-line text, so it fits a fixed-height row.</summary>
+public sealed class FirstLineConverter : IValueConverter
+{
+    public object Convert(object? value, Type t, object? p, CultureInfo c)
+    {
+        var text = value as string ?? "";
+        int nl = text.IndexOfAny(['\r', '\n']);
+        return nl < 0 ? text : text[..nl] + " …";
+    }
+    public object ConvertBack(object? value, Type t, object? p, CultureInfo c) => throw new NotSupportedException();
 }
 
 public sealed class BytesConverter : IValueConverter

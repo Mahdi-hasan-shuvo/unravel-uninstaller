@@ -10,7 +10,7 @@
     <RootNamespace>Unravel.App</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>unravel.ico</ApplicationIcon>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Product>Unravel</Product>
     <Description>Uninstaller and system clean-up toolkit</Description>
   </PropertyGroup>

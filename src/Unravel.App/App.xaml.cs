@@ -10,6 +10,9 @@ public partial class App : Application
     {
         base.OnStartup(e);
         DispatcherUnhandledException += OnUnhandled;
+        // Failures in background work must not vanish silently: they are logged with the stack trace.
+        TaskScheduler.UnobservedTaskException += (_, args) => { LogCrash("Background task failed", args.Exception); args.SetObserved(); };
+        AppDomain.CurrentDomain.UnhandledException += (_, args) => { if (args.ExceptionObject is Exception ex) LogCrash("Unhandled error", ex); };
 
         Ui.Store.Load();
         ThemeManager.Apply(Ui.Settings.Theme);
@@ -28,6 +31,12 @@ public partial class App : Application
     private void OnUnhandled(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         e.Handled = true;
-        Ui.Error("Something went wrong", e.Exception.Message + "\n\n" + e.Exception.GetType().Name);
+        LogCrash("Something went wrong", e.Exception);
+        Ui.Error("Something went wrong", e.Exception.Message + "\n\n" + e.Exception.GetType().Name + "\n\nDetails were written to the activity log (Activity & recovery).");
+    }
+
+    private static void LogCrash(string what, Exception e)
+    {
+        try { Core.Logging.ActivityLog.Write(Core.Logging.LogLevel.Error, "Application", $"{what}: {e.Message}", e.ToString()); } catch { }
     }
 }

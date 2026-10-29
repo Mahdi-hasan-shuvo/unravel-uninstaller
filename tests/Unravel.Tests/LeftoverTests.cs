@@ -349,6 +349,112 @@ public class LeftoverScannerTests : IDisposable
         cts.Cancel();
         Assert.Throws<OperationCanceledException>(() => new LeftoverScanner(_env).Scan(_target, ScanMode.Advanced, cts.Token));
     }
+    // ------------------------------------------------------------ post-uninstall verification
+
+    /// <summary>Deletes the safe leftovers the way the wizard does and returns what was removed and what was kept.</summary>
+    private (ScanResult Scan, List<RemovedItem> Removed, List<string> Kept) RemoveRecommended()
+    {
+        var r = new LeftoverScanner(_env).Scan(_target, ScanMode.Moderate);
+        foreach (var n in r.RegistryRoot.Descendants().Where(n => n.IsCreated && n.Safety.IsSafeToAutoSelect)) n.IsChecked = true;
+        foreach (var f in r.Files.Where(f => f.IsCreated && f.Safety.IsSafeToAutoSelect)) f.IsChecked = true;
+        var regNodes = LeftoverRemover.SelectRegistry(r.RegistryRoot).ToDictionary(n => n.Location, StringComparer.OrdinalIgnoreCase);
+        var fileNodes = LeftoverRemover.SelectFiles(r.Files).ToDictionary(n => n.Location, StringComparer.OrdinalIgnoreCase);
+        var removed = new List<RemovedItem>();
+        foreach (var i in LeftoverRemover.DeleteRegistry(r.RegistryRoot, null, "test").Items.Where(i => i.Ok)) removed.Add(RemovedItem.From(regNodes[i.Location]));
+        foreach (var i in LeftoverRemover.DeleteFiles(r.Files, toRecycleBin: false).Items.Where(i => i.Ok)) removed.Add(RemovedItem.From(fileNodes[i.Location], i.FileOutcome));
+        bool Covered(string loc) => removed.Any(x => loc.Equals(x.Location, StringComparison.OrdinalIgnoreCase) || loc.StartsWith(x.Location + "\\", StringComparison.OrdinalIgnoreCase));
+        var kept = r.RegistryRoot.Descendants().Where(n => n.IsCreated && !Covered(n.Location)).Select(n => n.Location)
+            .Concat(r.Files.Where(f => f.IsCreated && !Covered(f.Location)).Select(f => f.Location)).ToList();
+        return (r, removed, kept);
+    }
+
+    [Fact]
+    public void VerificationConfirmsEveryDeletedItemAndReportsKeptOnes()
+    {
+        var (_, removed, kept) = RemoveRecommended();
+        Assert.NotEmpty(removed);
+        var report = new UninstallVerifier().Verify(new UninstallVerifier.Input
+        {
+            Target = _target,
+            StillRegistered = () => _target.UninstallKey!.Exists(),
+            Removed = removed,
+            Kept = kept,
+            Scanner = new LeftoverScanner(_env),
+            RescanMode = ScanMode.Moderate,
+        });
+
+        Assert.Equal(0, report.Count(VerificationStatus.StillPresent));
+        Assert.Contains(report.Checks, c => c.Area == VerificationArea.Registration && c.Status == VerificationStatus.Removed);
+        // Every deleted item was looked up again and confirmed gone.
+        foreach (var r in removed)
+            Assert.Contains(report.Checks, c => c.Location == r.Location && c.Status == VerificationStatus.Removed);
+        // Whatever the re-scan still finds is exactly what the user kept.
+        Assert.All(report.Checks.Where(c => c.Area == VerificationArea.Rescan), c => Assert.Equal(VerificationStatus.Kept, c.Status));
+        Assert.Equal(kept.Count > 0 ? VerificationVerdict.LeftoversKept : VerificationVerdict.Clean, report.Verdict);
+    }
+
+    [Fact]
+    public void VerificationDetectsItemsThatCameBackOrWereNeverRemoved()
+    {
+        var (_, removed, _) = RemoveRecommended();
+        // A running program re-creates its settings key and a folder after the "successful" deletion.
+        _sb.CreateKey(@"HKCU_Software\Contoso Widget\Recent", ("File1", "b.txt"));
+        Directory.CreateDirectory(_t.Path("AppData", "Contoso Widget"));
+        File.WriteAllText(_t.Path("AppData", "Contoso Widget", "settings.json"), "{}");
+
+        var report = new UninstallVerifier().Verify(new UninstallVerifier.Input
+        {
+            Target = _target,
+            StillRegistered = () => true,   // e.g. the uninstaller was cancelled
+            Removed = removed,
+            Scanner = new LeftoverScanner(_env),
+        });
+
+        Assert.Equal(VerificationVerdict.ItemsRemain, report.Verdict);
+        Assert.Contains(report.Checks, c => c.Area == VerificationArea.Registration && c.Status == VerificationStatus.StillPresent);
+        Assert.Contains(report.Checks, c => c.Location == K(@"HKCU_Software\Contoso Widget") && c.Status == VerificationStatus.StillPresent);
+        Assert.Contains(report.Checks, c => c.Location == _t.Path("AppData", "Contoso Widget") && c.Status == VerificationStatus.StillPresent);
+    }
+
+    [Fact]
+    public void VerificationChecksValuesFilesAndRestartPendingItems()
+    {
+        var run = _sb.Path("Run");
+        var locked = _t.File(@"locked\in-use.dll", "x");
+        var gone = _t.Path("gone.txt");
+        var removed = new List<RemovedItem>
+        {
+            new(LeftoverKind.RegistryValue, run.FullPath + @"\WidgetTray", run, "WidgetTray"),     // still there
+            new(LeftoverKind.RegistryValue, run.FullPath + @"\Missing", run, "Missing"),           // gone
+            new(LeftoverKind.File, locked, FsPath: locked, Outcome: DeleteOutcome.ScheduledForReboot),
+            new(LeftoverKind.File, gone, FsPath: gone, Outcome: DeleteOutcome.Recycled),
+        };
+        var report = new UninstallVerifier().Verify(new UninstallVerifier.Input { Target = new ScanTarget { DisplayName = "x" }, Removed = removed });
+
+        Assert.Equal(VerificationStatus.StillPresent, report.Checks.Single(c => c.Location.EndsWith(@"\WidgetTray")).Status);
+        Assert.Equal(VerificationStatus.Removed, report.Checks.Single(c => c.Location.EndsWith(@"\Missing")).Status);
+        Assert.Equal(VerificationStatus.PendingRestart, report.Checks.Single(c => c.Location == locked).Status);
+        var recycled = report.Checks.Single(c => c.Location == gone);
+        Assert.Equal(VerificationStatus.Removed, recycled.Status);
+        Assert.Contains("Recycle Bin", recycled.Detail);
+    }
+
+    [Fact]
+    public void VerificationReportsTheInstallFolderAndRestartOnlyVerdict()
+    {
+        // The install folder is still full and nothing else was touched.
+        var report = new UninstallVerifier().Verify(new UninstallVerifier.Input { Target = _target, CheckProcesses = false });
+        var folder = report.Checks.Single(c => c.Area == VerificationArea.InstallFolder);
+        Assert.Equal(VerificationStatus.StillPresent, folder.Status);
+        Assert.Contains("2 file(s)", folder.Detail);
+
+        var pendingOnly = new UninstallVerifier().Verify(new UninstallVerifier.Input
+        {
+            Target = new ScanTarget { DisplayName = "x" },
+            Removed = [new(LeftoverKind.File, _exe, FsPath: _exe, Outcome: DeleteOutcome.ScheduledForReboot)],
+        });
+        Assert.Equal(VerificationVerdict.CleanAfterRestart, pendingOnly.Verdict);
+    }
 }
 
 public class NameMatcherTests

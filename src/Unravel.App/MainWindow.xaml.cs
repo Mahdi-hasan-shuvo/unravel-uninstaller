@@ -24,6 +24,41 @@ public partial class MainWindow : Window
         AdminBanner.Visibility = ProcessUtil.IsElevated ? Visibility.Collapsed : Visibility.Visible;
         if (ProcessUtil.IsElevated) Title = "Unravel (Administrator)";
         Loaded += (_, _) => NavPrograms.IsChecked = true;
+        SizeChanged += (_, e) => { if (e.WidthChanged) ApplyNavLayout(e.NewSize.Width < CompactBelow); };
+    }
+
+    // ------------------------------------------------------------ responsive navigation
+
+    /// <summary>Below this window width the navigation collapses to an icon rail, giving the pages room.</summary>
+    private const double CompactBelow = 1180;
+    private bool? _compactNav;
+    private readonly HashSet<FrameworkElement> _navTips = [];
+
+    private void ApplyNavLayout(bool compact)
+    {
+        if (_compactNav == compact) return;
+        _compactNav = compact;
+        NavColumn.Width = new GridLength(compact ? 68 : 232);
+        NavPanel.Margin = compact ? new Thickness(8, 16, 8, 12) : new Thickness(12, 16, 12, 12);
+        BrandText.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        foreach (var child in NavList.Children.OfType<UIElement>().Concat(NavFooter.Children.OfType<UIElement>()))
+        {
+            switch (child)
+            {
+                case TextBlock section:   // group headings become simple gaps
+                    section.Visibility = compact ? Visibility.Hidden : Visibility.Visible;
+                    section.Height = compact ? 0 : double.NaN;
+                    break;
+                case ContentControl { Content: StackPanel item } nav when item.Children.Count >= 2:
+                    var label = (TextBlock)item.Children[^1];
+                    label.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+                    ((FrameworkElement)item.Children[0]).Margin = compact ? new Thickness(4, 0, 0, 0) : new Thickness(0, 0, 12, 0);
+                    // The label moves into the tooltip so every icon still says what it is.
+                    if (compact && nav.ToolTip is null) { nav.ToolTip = label.Text; _navTips.Add(nav); }
+                    else if (!compact && _navTips.Remove(nav)) nav.ClearValue(ToolTipProperty);
+                    break;
+            }
+        }
     }
 
     private FrameworkElement CreatePage(string tag) => tag switch

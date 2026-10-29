@@ -11,7 +11,7 @@ A free, open-source uninstaller for Windows 10 and 11 with leftover scanning, in
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
 [![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows&logoColor=white)](#-system-requirements)
 [![.NET 8](https://img.shields.io/badge/.NET-8-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/download/dotnet/8.0)
-[![Tests](https://img.shields.io/badge/tests-222%20passing-22c55e)](docs/TEST_REPORT.md)
+[![Tests](https://img.shields.io/badge/tests-226%20passing-22c55e)](docs/TEST_REPORT.md)
 [![GitHub stars](https://img.shields.io/github/stars/Mahdi-hasan-shuvo/unravel-uninstaller?style=social)](https://github.com/Mahdi-hasan-shuvo/unravel-uninstaller/stargazers)
 
 [**Download**](https://github.com/Mahdi-hasan-shuvo/unravel-uninstaller/releases/latest) ·
@@ -19,7 +19,8 @@ A free, open-source uninstaller for Windows 10 and 11 with leftover scanning, in
 [Screenshots](#-screenshots) ·
 [How it works](#-how-it-works) ·
 [Build from source](#-build-from-source) ·
-[FAQ](#-faq)
+[FAQ](#-faq) ·
+[Contact](#-contact--hire-me)
 
 <img src="docs/media/unravel-demo.gif" alt="Unravel uninstalling a program, scanning for leftovers and removing them after a preview" width="880">
 
@@ -43,6 +44,7 @@ Unravel runs the uninstaller **and then finds what it missed**, tells you how su
 | Find leftover registry keys, folders and startup entries | ❌ | ✅ |
 | Rate every leftover High / Medium / Low and block system-critical items | ❌ | ✅ |
 | Back up registry items and quarantine files before removal | ❌ | ✅ |
+| Verify afterwards that the program and its leftovers are really gone | ❌ | ✅ |
 | Record an installation and remove exactly what it added | ❌ | ✅ |
 | Remove Microsoft Store apps *and* their leftovers | Apps only | ✅ |
 | Install, update and reinstall apps with WinGet | ❌ | ✅ |
@@ -57,6 +59,7 @@ Unravel runs the uninstaller **and then finds what it missed**, tells you how su
 
 - **Complete uninstall.** Lists every installed program (all users and current user, 64- and 32-bit) with icon, size, version, publisher and install date. Runs the uninstaller, waits for the whole process tree, then scans for leftovers.
 - **Three scan modes.** *Safe*, *Moderate* and *Advanced* control how deep the leftover search goes. Results appear as a registry tree and a file list.
+- **Post-uninstall verification.** After cleanup, Unravel checks everything again: whether Windows still lists the program, whether the install folder and its running processes are gone, whether every deleted key, value, file and folder is really gone, and a fresh re-scan (at least *Moderate*) for anything still findable. Each item is reported as *Removed*, *Still present*, *After restart* or *Kept*. If anything remains, **Scan again** takes you straight to it.
 - **Change, repair and forced MSI uninstall.** Run the installer's modify path, Windows Installer repair or forced removal, or remove a broken entry (with a backup).
 - **Windows apps.** List and remove Microsoft Store (MSIX/AppX) apps with the same leftover scan.
 - **Hunter mode.** Drag a small target onto any window, desktop shortcut or taskbar button to uninstall that program, stop it from starting with Windows, end it or open its folder.
@@ -106,6 +109,7 @@ Unravel runs the uninstaller **and then finds what it missed**, tells you how su
 ### 🧰 And more
 
 - One-click access to **18 built-in Windows tools**.
+- **Responsive layout.** In narrow windows the sidebar collapses to an icon rail and toolbars wrap, so nothing overlaps down to the 980 × 600 minimum.
 - **Activity & recovery.** A daily log of every change Unravel made, and a restore button for quarantined items.
 - Light, dark and system themes; a modern Windows 11-style interface.
 
@@ -125,7 +129,7 @@ Unravel runs the uninstaller **and then finds what it missed**, tells you how su
 
 | | |
 |:---:|:---:|
-| <img src="docs/media/screenshots/wizard-files.png" alt="Leftover files and folders step" width="420"><br>Leftover files and folders | <img src="docs/media/screenshots/wizard-done.png" alt="Uninstall finished summary" width="420"><br>Uninstall summary |
+| <img src="docs/media/screenshots/wizard-files.png" alt="Leftover files and folders step" width="420"><br>Leftover files and folders | <img src="docs/media/screenshots/wizard-verified.png" alt="Post-uninstall verification showing every item confirmed removed" width="420"><br>Post-uninstall verification |
 | <img src="docs/media/screenshots/startup-manager.png" alt="Startup manager" width="420"><br>Startup manager | <img src="docs/media/screenshots/windows-history.png" alt="Windows history cleaner" width="420"><br>Windows history cleaner |
 
 </details>
@@ -146,7 +150,9 @@ flowchart LR
     F --> G[Deletion preview]
     G --> H[.reg backup + quarantine]
     H --> I[Remove]
-    I --> J[(Activity log)]
+    I --> V[Verify: look everything up again<br/>+ re-scan]
+    V -->|items remain| E
+    V --> J[(Activity log)]
 ```
 
 ### How leftovers are found and rated
@@ -208,6 +214,7 @@ flowchart TB
 3. Choose **Safe**, **Moderate** (default) or **Advanced** and press **Scan**.
 4. Press **Select recommended**. Only High and Medium items without risk flags are ticked.
 5. Press **Delete selected**, check the preview, and confirm. Registry items are backed up first and files go to the Recycle Bin or quarantine.
+6. The last step shows the **verification**: *Verified clean*, *Clean after restart*, or the items still present with **Scan again** to remove them.
 
 </details>
 
@@ -294,7 +301,7 @@ git clone https://github.com/Mahdi-hasan-shuvo/unravel-uninstaller.git
 cd unravel-uninstaller
 dotnet build Unravel.sln
 dotnet run --project src/Unravel.App                  # start the app
-dotnet test tests/Unravel.Tests                       # 222 automated tests
+dotnet test tests/Unravel.Tests                       # 226 automated tests
 dotnet publish src/Unravel.App -c Release -o publish  # framework-dependent build
 ```
 
@@ -333,16 +340,17 @@ unravel-uninstaller/
 | Windows integration | Registry, Win32 P/Invoke (`NtQuerySystemInformation`, PDH, `WinVerifyTrust`, `SHFileOperation`), WinRT `PackageManager`, WMI restore points, Task Scheduler COM, UI Automation |
 | Data | System.Text.Json settings, Microsoft.Data.Sqlite for browser databases, compressed binary snapshots |
 | Package management | `winget.exe`, with a language-independent output parser |
-| Testing | xUnit (222 tests) and end-to-end UI Automation scripts |
+| Testing | xUnit (226 tests) and end-to-end UI Automation scripts |
 
 ---
 
 ## ✅ Quality & testing
 
-- **222 automated tests, 0 failing.** They cover the inventory, leftover scanner, safety engine, tracker, WinGet parser, monitor, performance, cleaners, secure delete and more. Every registry test runs in a sandbox key and every file test in a temp folder.
+- **226 automated tests, 0 failing.** They cover the inventory, leftover scanner, safety engine, tracker, WinGet parser, monitor, performance, cleaners, secure delete and more. Every registry test runs in a sandbox key and every file test in a temp folder.
 - **End-to-end UI tests** drive the real app through Windows UI Automation. They cover full uninstalls in all three modes, the install tracker with undo, Hunter mode, WinGet install and uninstall, and live-monitor alerts.
 - **Checked against Windows.** The program list matches Windows' own *Programs and Features* (0 missing), and startup states match Task Manager.
 - **Zero compiler warnings** in Release builds.
+- **Fast and responsive.** Measured on a real PC with 113 programs: the program list loads in 35 ms; leftover scans average 0.3 s (Safe), 0.5 s (Moderate) and 1.5 s (Advanced); an install-tracker snapshot of 900,000 files and 470,000 registry keys takes about 11 s, walked in parallel. Deletions, scans and verification run in the background, and a UI-thread probe measured no stall above 250 ms on any page.
 
 See the full [test report](docs/TEST_REPORT.md), including what could not be tested and why.
 
@@ -367,6 +375,7 @@ Found a safety or security issue? Please report it privately; see [SECURITY.md](
 - [x] Smart safety engine, deletion preview, quarantine and registry backups
 - [x] Installation change tracker with undo
 - [x] WinGet integration, performance insights, live monitor, duplicate and orphan finder
+- [x] Post-uninstall verification, 3× faster install snapshots, responsive layout
 - [ ] Code-signed releases
 - [ ] Publish to WinGet, Scoop and Chocolatey
 - [ ] Translations (the interface is English-only today)
@@ -430,6 +439,20 @@ No. Unravel needs Windows 10 version 2004 or later, or Windows 11.
 
 ---
 
+## 📬 Contact & hire me
+
+Questions, feedback, or a project in mind? Get in touch:
+
+| | |
+|---|---|
+| 📧 **Email** | [shuvobbhh@gmail.com](mailto:shuvobbhh@gmail.com) |
+| 💬 **WhatsApp** | [wa.me/8801616397082](https://wa.me/8801616397082) |
+| 💼 **Work** | Open to paid projects and collaboration: Windows desktop apps, system tools and automation. |
+
+For bugs and feature requests, please use [GitHub Issues](https://github.com/Mahdi-hasan-shuvo/unravel-uninstaller/issues) so others can follow along.
+
+---
+
 ## 🤝 Contributing
 
 Contributions are welcome: bug reports, fixes, tests and features. Read [CONTRIBUTING.md](CONTRIBUTING.md) to get started. Good first steps:
@@ -457,6 +480,6 @@ Contributions are welcome: bug reports, fixes, tests and features. Read [CONTRIB
 
 ### ⭐ If Unravel cleaned up your PC, star the repo so others can find it.
 
-[**Download Unravel**](https://github.com/Mahdi-hasan-shuvo/unravel-uninstaller/releases/latest) · [Report a bug](https://github.com/Mahdi-hasan-shuvo/unravel-uninstaller/issues) · [Request a feature](https://github.com/Mahdi-hasan-shuvo/unravel-uninstaller/issues/new?template=feature_request.yml)
+[**Download Unravel**](https://github.com/Mahdi-hasan-shuvo/unravel-uninstaller/releases/latest) · [Contact](mailto:shuvobbhh@gmail.com) · [Report a bug](https://github.com/Mahdi-hasan-shuvo/unravel-uninstaller/issues) · [Request a feature](https://github.com/Mahdi-hasan-shuvo/unravel-uninstaller/issues/new?template=feature_request.yml)
 
 </div>

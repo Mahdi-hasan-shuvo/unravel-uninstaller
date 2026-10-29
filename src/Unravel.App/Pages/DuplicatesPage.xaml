@@ -49,21 +49,22 @@
             </Border>
             <Border Grid.Column="1" Style="{StaticResource Card}" Margin="12,0,0,0" Padding="0">
                 <DockPanel>
+                    <!-- Summary above the actions: side by side, a long summary squeezed the buttons into tall slabs. -->
                     <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="12,8">
-                        <DockPanel>
-                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <StackPanel>
+                            <TextBlock x:Name="DupSummary" Foreground="{DynamicResource MutedTextBrush}" Text="Choose folders and press Find duplicates." TextWrapping="Wrap" Margin="0,0,0,8"/>
+                            <WrapPanel Orientation="Horizontal">
                                 <TextBlock Text="Keep" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                <ComboBox x:Name="KeepRule" Width="170" SelectedIndex="0" Margin="0,0,6,0">
+                                <ComboBox x:Name="KeepRule" Width="170" SelectedIndex="0" Margin="0,0,6,0" VerticalAlignment="Center">
                                     <ComboBoxItem Content="newest copy"/>
                                     <ComboBoxItem Content="oldest copy"/>
                                     <ComboBoxItem Content="shortest path"/>
                                     <ComboBoxItem Content="copy in a chosen folder…"/>
                                 </ComboBox>
-                                <Button Content="Select others" Click="ApplyRule_Click" Margin="0,0,8,0"/>
-                                <Button x:Name="DupDelete" Style="{StaticResource DangerButton}" Content="Remove checked…" Click="DupDelete_Click" IsEnabled="False"/>
-                            </StackPanel>
-                            <TextBlock x:Name="DupSummary" VerticalAlignment="Center" Foreground="{DynamicResource MutedTextBrush}" Text="Choose folders and press Find duplicates." TextWrapping="Wrap"/>
-                        </DockPanel>
+                                <Button Content="Select others" Click="ApplyRule_Click" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                <Button x:Name="DupDelete" Style="{StaticResource DangerButton}" Content="Remove checked…" Click="DupDelete_Click" IsEnabled="False" VerticalAlignment="Center"/>
+                            </WrapPanel>
+                        </StackPanel>
                     </Border>
                     <Grid>
                         <DataGrid x:Name="DupGrid" Background="Transparent" IsReadOnly="False" SelectionMode="Extended" RowHeight="30">
@@ -117,7 +118,7 @@
             <DockPanel>
                 <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="12,8">
                     <DockPanel>
-                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                             <Button x:Name="OrphanScan" Style="{StaticResource PrimaryButton}" Content="Find orphans" Click="OrphanScan_Click" Margin="0,0,8,0"/>
                             <Button x:Name="OrphanDelete" Style="{StaticResource DangerButton}" Content="Remove checked…" Click="OrphanDelete_Click" IsEnabled="False"/>
                         </StackPanel>

@@ -37,7 +37,9 @@ public sealed class RecoveryPage : UserControl, IPage
         _log.Columns.Add(new DataGridTextColumn { Header = "Level", Binding = new Binding(nameof(LogEntry.Level)), Width = 80 });
         _log.Columns.Add(new DataGridTextColumn { Header = "Area", Binding = new Binding(nameof(LogEntry.Area)), Width = 130 });
         _log.Columns.Add(new DataGridTextColumn { Header = "What happened", Binding = new Binding(nameof(LogEntry.Message)), Width = new DataGridLength(3, DataGridLengthUnitType.Star) });
-        _log.Columns.Add(new DataGridTextColumn { Header = "Details", Binding = new Binding(nameof(LogEntry.Detail)), Width = new DataGridLength(2, DataGridLengthUnitType.Star) });
+        // One line per row; the full text is in the row details when a row is selected.
+        _log.Columns.Add(new DataGridTextColumn { Header = "Details", Binding = new Binding(nameof(LogEntry.Detail)) { Converter = new Infrastructure.FirstLineConverter() },
+            Width = new DataGridLength(2, DataGridLengthUnitType.Star), ElementStyle = (Style)FindResource("MutedCellText") });
         _log.RowDetailsVisibilityMode = DataGridRowDetailsVisibilityMode.VisibleWhenSelected;
         _log.RowDetailsTemplate = (DataTemplate)System.Windows.Markup.XamlReader.Parse(
             "<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'><TextBox Text='{Binding Detail, Mode=OneWay}' IsReadOnly='True' " +

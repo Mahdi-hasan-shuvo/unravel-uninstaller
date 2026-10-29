@@ -47,8 +47,8 @@
         <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Padding="6" Margin="0,0,0,10">
             <Grid>
                 <DockPanel x:Name="InstalledBar">
-                    <TextBox x:Name="FilterBox" DockPanel.Dock="Right" Width="240" Tag="Filter" TextChanged="Filter_Changed"/>
-                    <StackPanel Orientation="Horizontal">
+                    <TextBox x:Name="FilterBox" DockPanel.Dock="Right" Width="200" Tag="Filter" TextChanged="Filter_Changed" VerticalAlignment="Top"/>
+                    <WrapPanel Orientation="Horizontal">
                         <Button Style="{StaticResource ToolButton}" Content="Update" Click="Update_Click"/>
                         <Button Style="{StaticResource ToolButton}" Content="Uninstall…" Click="Uninstall_Click" ToolTip="Uninstall with WinGet and scan for leftovers"/>
                         <Button Style="{StaticResource ToolButton}" Content="Reinstall…" Click="Reinstall_Click"/>
@@ -56,7 +56,7 @@
                         <Button Style="{StaticResource ToolButton}" Content="Refresh" Click="Refresh_Click"/>
                         <CheckBox x:Name="HideLocal" Content="Only packages WinGet can manage" Margin="12,0,0,0" VerticalAlignment="Center" Click="Filter_Changed"
                                   ToolTip="Hide programs WinGet only knows from Programs and Features (they can't be updated through WinGet)"/>
-                    </StackPanel>
+                    </WrapPanel>
                 </DockPanel>
                 <StackPanel x:Name="UpdatesBar" Orientation="Horizontal" Visibility="Collapsed">
                     <Button Style="{StaticResource PrimaryButton}" Content="Update selected" Click="Update_Click" Margin="0,0,8,0"/>

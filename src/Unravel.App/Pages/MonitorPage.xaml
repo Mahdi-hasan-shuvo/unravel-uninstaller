@@ -26,10 +26,10 @@
             <Border Style="{StaticResource Card}" Margin="0,0,6,0" Padding="14">
                 <DockPanel>
                     <DockPanel DockPanel.Dock="Top">
-                        <TextBlock x:Name="CpuValue" DockPanel.Dock="Right" Style="{StaticResource BigNumber}" Text="–"/>
+                        <TextBlock x:Name="CpuValue" DockPanel.Dock="Right" Style="{StaticResource BigNumber}" Text="–" Margin="10,0,0,0"/>
                         <StackPanel>
                             <TextBlock Text="CPU" FontWeight="SemiBold"/>
-                            <TextBlock x:Name="CpuDetail" FontSize="12" Foreground="{DynamicResource MutedTextBrush}"/>
+                            <TextBlock x:Name="CpuDetail" FontSize="12" Foreground="{DynamicResource MutedTextBrush}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
                         </StackPanel>
                     </DockPanel>
                     <infra:Sparkline x:Name="CpuChart" Height="70" Margin="0,8,0,0" Stroke="{DynamicResource AccentBrush}"/>
@@ -38,10 +38,10 @@
             <Border Style="{StaticResource Card}" Margin="6,0" Padding="14">
                 <DockPanel>
                     <DockPanel DockPanel.Dock="Top">
-                        <TextBlock x:Name="MemValue" DockPanel.Dock="Right" Style="{StaticResource BigNumber}" Text="–"/>
+                        <TextBlock x:Name="MemValue" DockPanel.Dock="Right" Style="{StaticResource BigNumber}" Text="–" Margin="10,0,0,0"/>
                         <StackPanel>
                             <TextBlock Text="Memory" FontWeight="SemiBold"/>
-                            <TextBlock x:Name="MemDetail" FontSize="12" Foreground="{DynamicResource MutedTextBrush}"/>
+                            <TextBlock x:Name="MemDetail" FontSize="12" Foreground="{DynamicResource MutedTextBrush}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
                         </StackPanel>
                     </DockPanel>
                     <infra:Sparkline x:Name="MemChart" Height="70" Margin="0,8,0,0" Stroke="{DynamicResource SuccessBrush}"/>
@@ -50,10 +50,10 @@
             <Border Style="{StaticResource Card}" Margin="6,0,0,0" Padding="14">
                 <DockPanel>
                     <DockPanel DockPanel.Dock="Top">
-                        <TextBlock x:Name="DiskValue" DockPanel.Dock="Right" Style="{StaticResource BigNumber}" Text="–"/>
+                        <TextBlock x:Name="DiskValue" DockPanel.Dock="Right" Style="{StaticResource BigNumber}" Text="–" Margin="10,0,0,0"/>
                         <StackPanel>
                             <TextBlock Text="Disk" FontWeight="SemiBold"/>
-                            <TextBlock x:Name="DiskDetail" FontSize="12" Foreground="{DynamicResource MutedTextBrush}"/>
+                            <TextBlock x:Name="DiskDetail" FontSize="12" Foreground="{DynamicResource MutedTextBrush}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
                         </StackPanel>
                     </DockPanel>
                     <infra:Sparkline x:Name="DiskChart" Height="70" Margin="0,8,0,0" Stroke="{DynamicResource WarningBrush}" AutoScale="True"/>

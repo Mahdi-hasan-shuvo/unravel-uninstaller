@@ -125,6 +125,27 @@ system (build 26300, standard user rights); see *Evidence* under each feature.
 - `MonitorTests` (7): sane sampling including protected processes; lsass, System and itself protected, with a harmless process ended; sustained-CPU raise/resolve; short spikes ignored; memory growth; masquerading and unsigned-temp alerts with ignore; services listing and core-service protection.
 - UI end-to-end: a compiled CPU burner in `%TEMP%` triggered "cpuburner.exe is using 74% CPU" and "Unsigned program running from a temporary folder". **End process** from the alert ended it, and the alerts cleared.
 
+## 7. Post-uninstall verification (1.1)
+
+After the leftover steps, the wizard's last page checks again instead of trusting the deletion reports (`Core/Leftovers/UninstallVerifier.cs`):
+
+- **Registration:** is the program still listed (uninstall key, Windows app package or WinGet entry)?
+- **Install folder:** gone, or how many files and bytes remain; **running processes** from it.
+- **Every deleted item** is looked up again: keys and values in the registry, files and folders on disk. Items in use that Windows deletes at the next restart are reported as *After restart*; items moved to the Recycle Bin say so.
+- **Re-scan** in the same mode, but never shallower than *Moderate*, so a Safe scan cannot hide app-data folders and startup entries. Items the user chose to keep are reported as *Kept*, not as failures.
+- The verdict (*Verified clean*, *Clean after restart*, *Verified · items kept*, or *N item(s) still present*) replaces the summary. **Scan again** opens the leftover steps for whatever remains, and **Verify again** repeats the checks. The result is written to the activity log.
+
+*Evidence:* four unit tests in a sandboxed registry and folder tree (deleted items confirmed, kept items not counted as failures, re-created keys and folders detected, values / Recycle Bin / restart-pending files, install folder counts). UI end-to-end runs in all three modes matched the independent `demo_check.ps1` exactly; see the test report.
+
+*Limit:* verification can only find what the scanner can find. Leftovers the scanner cannot attribute to the program, even in *Advanced*, are not reported.
+
+## Performance and responsiveness (1.1)
+
+- The install-tracker snapshot walks files and the registry at the same time, each with several workers: **10.6 s instead of 31.6 s** for the same 900,869 files and 469,772 keys.
+- The uninstall wizard's registry backup and deletion, Recycle Bin moves and the running-process lookup moved off the UI thread, behind a progress overlay.
+- Unhandled errors, including those in background tasks, are written to the activity log with the stack trace.
+- Responsive layout: below 1,180 px the navigation collapses to an icon rail with tooltips, and toolbars wrap instead of overlapping.
+
 ## Not done / needs a human
 
 - Anything that needs administrator rights was not exercised end-to-end: `HKLM` and Program Files cleanup, service removal by the tracker, service start/stop, and the boot duration reading. The code reports these clearly and offers **Restart as administrator**.

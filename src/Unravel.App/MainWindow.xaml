@@ -7,22 +7,22 @@
         Foreground="{DynamicResource TextBrush}" TextOptions.TextFormattingMode="Display">
     <Grid>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="232"/>
+            <ColumnDefinition x:Name="NavColumn" Width="232"/>
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
 
         <!-- Navigation -->
         <Border Background="{DynamicResource NavBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0">
-            <DockPanel Margin="12,16,12,12">
+            <DockPanel x:Name="NavPanel" Margin="12,16,12,12">
                 <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="6,0,0,18">
                     <Image Source="unravel.png" Width="30" Height="30"/>
-                    <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                    <StackPanel x:Name="BrandText" Margin="10,0,0,0" VerticalAlignment="Center">
                         <TextBlock Text="Unravel" FontFamily="{StaticResource DisplayFont}" FontSize="18" FontWeight="SemiBold"/>
                         <TextBlock Text="Uninstaller &amp; clean-up" FontSize="11" Foreground="{DynamicResource MutedTextBrush}"/>
                     </StackPanel>
                 </StackPanel>
 
-                <StackPanel DockPanel.Dock="Bottom">
+                <StackPanel x:Name="NavFooter" DockPanel.Dock="Bottom">
                     <Button x:Name="HunterButton" AutomationProperties.Name="Hunter mode" Style="{StaticResource GhostButton}" HorizontalContentAlignment="Left" Click="Hunter_Click"
                             ToolTip="Hide this window and show a target you can drag onto any window or desktop icon">
                         <StackPanel Orientation="Horizontal">
@@ -42,7 +42,7 @@
                 </StackPanel>
 
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel>
+                    <StackPanel x:Name="NavList">
                         <TextBlock Text="APPS" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource FaintTextBrush}" Margin="10,0,0,6"/>
                         <RadioButton AutomationProperties.Name="Programs" x:Name="NavPrograms" Style="{StaticResource NavItem}" GroupName="Nav" Tag="programs" Checked="Nav_Checked">
                             <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Icon}" Text="&#xE71D;" Margin="0,0,12,0"/><TextBlock Text="Programs"/></StackPanel>
@@ -106,7 +106,8 @@
                     <Button DockPanel.Dock="Right" Content="Restart as administrator" Click="Elevate_Click" Padding="12,4" MinHeight="28"/>
                     <TextBlock DockPanel.Dock="Left" Style="{StaticResource Icon}" Text="&#xEA18;" Foreground="{DynamicResource WarningBrush}" Margin="0,0,10,0"/>
                     <TextBlock TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,0" Foreground="{DynamicResource TextBrush}"
-                               Text="Running with standard rights. Uninstallers still work (Windows asks for permission), but removing all-users leftovers, restore points and services need administrator rights."/>
+                               Text="Standard rights: uninstalling works, but all-users leftovers, restore points and services need administrator rights."
+                               TextTrimming="CharacterEllipsis" ToolTip="Uninstallers still run (Windows asks for permission when they need it). Removing leftovers under HKEY_LOCAL_MACHINE and Program Files, creating restore points and changing services need administrator rights."/>
                 </DockPanel>
             </Border>
             <ContentControl x:Name="PageHost" Focusable="False"/>

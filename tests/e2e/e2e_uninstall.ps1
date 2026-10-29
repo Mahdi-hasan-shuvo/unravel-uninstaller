@@ -1,5 +1,5 @@
 # Drives Unravel's real UI through a full uninstall of the demo program and records each step.
-param([string]$Mode = 'ModeModerate')
+param([string]$Mode = 'ModeModerate', [switch]$ScanAgainAfterVerify)
 $S = Join-Path $PSScriptRoot "out"; New-Item -ItemType Directory -Force $S | Out-Null
 . (Join-Path $PSScriptRoot "ui.ps1")
 $exe = (Join-Path $PSScriptRoot "..\..\src\Unravel.App\bin\Debug\net8.0-windows10.0.19041.0\Unravel.exe")
@@ -73,6 +73,35 @@ Start-Sleep 1
 Save-Window $wiz "$S\e2e_4_done.png"
 $doneText = Find-ById $wiz 'DoneText'
 Step "done: $($doneText.Current.Name)"
+# Post-uninstall verification runs in the background on the last step.
+$verdict = Wait-For { $v = (Find-ById $wiz 'VerdictText').Current.Name; if ($v -and $v -ne ([string][char]0x2026).Insert(0,'Verifying')) { $v } } 60
+Step "verification: $verdict | $((Find-ById $wiz 'VerifySummary').Current.Name) | title: $((Find-ById $wiz 'DoneTitle').Current.Name)"
+Save-Window $wiz "$S\e2e_5_verified.png"
+if ($ScanAgainAfterVerify -and $verdict -like '*still present*') {
+    # Verification found items; "Scan again" re-runs the leftover scan so they can be reviewed and removed.
+    Invoke-El (Find-ById $wiz 'ScanAgainButton') | Out-Null; Step "scan again"
+    $reg = Wait-For { $t = Find-ById $wiz 'RegistryTitle'; if ($t -and -not $t.Current.IsOffscreen -and $t.Current.Name -like 'Leftover*') { $t } } 60
+    if ($reg) {
+        Step "  registry step: $($reg.Current.Name)"
+        Invoke-El (Find-ById $wiz 'RegSelectAllButton') | Out-Null; Start-Sleep -Milliseconds 500
+        Invoke-El (Find-ById $wiz 'RegDeleteButton') | Out-Null
+        Click-Dialog $p.Id 'Delete registry items' 'Delete' | Out-Null
+        Start-Sleep 2
+    }
+    $files = Wait-For { $t = Find-ById $wiz 'FilesTitle'; if ($t -and -not $t.Current.IsOffscreen -and $t.Current.Name -like 'Leftover*') { $t } } 20
+    if ($files) {
+        Step "  files step: $($files.Current.Name)"
+        Invoke-El (Find-ById $wiz 'FileSelectAllButton') | Out-Null; Start-Sleep -Milliseconds 500
+        Invoke-El (Find-ById $wiz 'FileDeleteButton') | Out-Null
+        Click-Dialog $p.Id 'Delete files and folders' 'Delete' | Out-Null
+        Start-Sleep 2
+        Invoke-El (Find-ById $wiz 'NextButton') | Out-Null
+    }
+    Start-Sleep 1
+    $verdict = Wait-For { $v = (Find-ById $wiz 'VerdictText').Current.Name; if ($v -and $v -ne ([string][char]0x2026).Insert(0,'Verifying')) { $v } } 60
+    Step "verification after scan again: $verdict | $((Find-ById $wiz 'VerifySummary').Current.Name)"
+    Save-Window $wiz "$S\e2e_6_reverified.png"
+}
 Invoke-El (Find-ById $wiz 'CloseButton') | Out-Null
 Start-Sleep 2
 Step "wizard closed: $(-not (Get-AppWindow $p.Id 'Uninstall Contoso*'))"

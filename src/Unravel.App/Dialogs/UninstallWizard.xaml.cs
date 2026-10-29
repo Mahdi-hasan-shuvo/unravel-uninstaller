@@ -12,6 +12,8 @@ namespace Unravel.App.Dialogs;
 
 public sealed record LogLine(string Glyph, string Text, Brush Brush);
 
+public sealed record VerifyRow(string Glyph, string StatusText, string Location, string Detail, Brush Brush);
+
 public partial class UninstallWizard : Window
 {
     private enum Step { Uninstall, Scan, Registry, Files, Done }
@@ -27,6 +29,9 @@ public partial class UninstallWizard : Window
     private int _deletedRegistry, _deletedFiles, _failed, _rebootPending;
     private string? _backupFolder;
     private string? _doneOverride;
+    private readonly List<RemovedItem> _removed = [];
+    private ScanMode _lastMode = ScanMode.Moderate;
+    private CancellationTokenSource? _verifyCts;
 
     public bool ListMayHaveChanged { get; private set; }
 
@@ -94,13 +99,13 @@ public partial class UninstallWizard : Window
 
         if (s.StopRunningExecutables && !_job.IsWindowsApp && _job.Target.InstallFolder is { } folder && !ScanTarget.IsBroadFolder(folder))
         {
-            var running = ProcessUtil.FindUnderFolder(folder);
+            var running = await Task.Run(() => ProcessUtil.FindUnderFolder(folder));
             if (running.Count > 0)
             {
                 var names = string.Join(", ", running.Select(r => r.Name).Distinct().Take(6));
                 if (Ui.Confirm("Close running programs?", $"These programs from the install folder are running: {names}.\n\nThey will be closed so their files can be removed. Unsaved work in them will be lost.", "Close them"))
                 {
-                    var (killed, failed) = ProcessUtil.Kill(running);
+                    var (killed, failed) = await Task.Run(() => ProcessUtil.Kill(running));
                     Log($"Closed {killed} running process(es)" + (failed > 0 ? $"; {failed} could not be closed." : "."), failed > 0 ? "warn" : "ok");
                 }
                 else Log("Running processes were left open; some files may not be removable.", "warn");
@@ -167,6 +172,7 @@ public partial class UninstallWizard : Window
         var scanner = new LeftoverScanner(env, s.RegistryExcludes, s.FolderExcludes, s.CheckAllLeftoversByDefault);
         var progress = new Progress<string>(m => ScanStatus.Text = m);
         var mode = SelectedMode;
+        _lastMode = mode;
         try
         {
             _result = await Task.Run(() => scanner.Scan(_job.Target, mode, _scanCts.Token, progress));
@@ -238,7 +244,7 @@ public partial class UninstallWizard : Window
         RefreshRegistryTitle();
     }
 
-    private void RegDelete_Click(object sender, RoutedEventArgs e)
+    private async void RegDelete_Click(object sender, RoutedEventArgs e)
     {
         if (_result is null) return;
         var selected = LeftoverRemover.SelectRegistry(_result.RegistryRoot);
@@ -247,12 +253,16 @@ public partial class UninstallWizard : Window
                 selected.Select(n => new PreviewItem(n.Location, n.Kind == LeftoverKind.RegistryValue ? "Value" : "Key", n.Safety)),
                 "Delete", Ui.Settings.Uninstaller.BackupRegistryBeforeDelete ? "A .reg backup is saved first (Settings › Registry backups)." : "Registry backups are turned off in Settings."))
             return;
-        DeleteRegistry(_result.RegistryRoot);
+        await DeleteRegistryAsync(_result.RegistryRoot);
     }
 
-    private void DeleteRegistry(LeftoverNode root)
+    private async Task DeleteRegistryAsync(LeftoverNode root)
     {
-        var report = LeftoverRemover.DeleteRegistry(root, Ui.Settings.Uninstaller.BackupRegistryBeforeDelete ? new RegistryBackup() : null, _job.DisplayName);
+        var byLocation = new Dictionary<string, LeftoverNode>(StringComparer.OrdinalIgnoreCase);
+        foreach (var n in LeftoverRemover.SelectRegistry(root)) byLocation.TryAdd(n.Location, n);
+        var backup = Ui.Settings.Uninstaller.BackupRegistryBeforeDelete ? new RegistryBackup() : null;
+        var report = await RunBusyAsync($"Backing up and deleting {byLocation.Count} registry item(s)…",
+            () => LeftoverRemover.DeleteRegistry(root, backup, _job.DisplayName));
         _backupFolder ??= report.BackupFolder;
         if (report.BackupError is not null)
         {
@@ -261,6 +271,8 @@ public partial class UninstallWizard : Window
         }
         _deletedRegistry += report.Succeeded;
         _failed += report.Failed;
+        foreach (var i in report.Items.Where(i => i.Ok))
+            if (byLocation.TryGetValue(i.Location, out var node)) _removed.Add(RemovedItem.From(node));
         var deleted = report.Items.Where(i => i.Ok).Select(i => i.Location).ToHashSet(StringComparer.OrdinalIgnoreCase);
         Prune(_result!.RegistryRoot, deleted);
         RefreshRegistryTitle();
@@ -290,7 +302,7 @@ public partial class UninstallWizard : Window
     private void ExpandSelected_Click(object s, RoutedEventArgs e) { if (SelectedNode is { } n) foreach (var d in n.SelfAndDescendants()) d.IsExpanded = true; }
     private void CollapseSelected_Click(object s, RoutedEventArgs e) { if (SelectedNode is { } n) foreach (var d in n.SelfAndDescendants()) d.IsExpanded = false; }
 
-    private void DeleteSelectedKey_Click(object sender, RoutedEventArgs e)
+    private async void DeleteSelectedKey_Click(object sender, RoutedEventArgs e)
     {
         if (SelectedNode is not { } n || n.Key is null) return;
         if (n.IsExcluded) { Ui.Error("Excluded item", "This item is on the exclude list and is protected from deletion."); return; }
@@ -303,7 +315,7 @@ public partial class UninstallWizard : Window
         var states = _result!.RegistryRoot.Descendants().ToDictionary(x => x, x => x.IsChecked);
         foreach (var x in _result.RegistryRoot.Descendants()) x.IsChecked = false;
         n.IsChecked = true;
-        DeleteRegistry(_result.RegistryRoot);
+        await DeleteRegistryAsync(_result.RegistryRoot);
         foreach (var (node, state) in states) if (!ReferenceEquals(node, n)) node.IsChecked = state;
         if (n.Key.Exists()) n.IsCreated = wasCreated;
     }
@@ -364,7 +376,7 @@ public partial class UninstallWizard : Window
     private void FileCheckSelected_Click(object s, RoutedEventArgs e) { foreach (var f in FilesGrid.SelectedItems.OfType<LeftoverNode>()) if (!f.IsExcluded) f.IsChecked = true; RefreshFilesTitle(); }
     private void FileUncheckSelected_Click(object s, RoutedEventArgs e) { foreach (var f in FilesGrid.SelectedItems.OfType<LeftoverNode>()) f.IsChecked = false; RefreshFilesTitle(); }
 
-    private void FileDelete_Click(object sender, RoutedEventArgs e)
+    private async void FileDelete_Click(object sender, RoutedEventArgs e)
     {
         if (_result is null) return;
         var selected = LeftoverRemover.SelectFiles(_result.Files);
@@ -379,7 +391,13 @@ public partial class UninstallWizard : Window
                 selected.Select(f => new PreviewItem(f.Location, f.Kind == LeftoverKind.Folder ? "Folder" : "File", f.Safety, f.Size)),
                 "Delete", recycle ? "Items go to the Recycle Bin." : "Items are deleted permanently (Recycle Bin is off in Settings)."))
             return;
-        var report = LeftoverRemover.DeleteFiles(_result.Files, recycle, scheduleLocked: ProcessUtil.IsElevated);
+        var byLocation = new Dictionary<string, LeftoverNode>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in selected) byLocation.TryAdd(f.Location, f);
+        var files = _result.Files.ToList();
+        var report = await RunBusyAsync(recycle ? $"Moving {selected.Count} item(s) to the Recycle Bin…" : $"Deleting {selected.Count} item(s)…",
+            () => LeftoverRemover.DeleteFiles(files, recycle, scheduleLocked: ProcessUtil.IsElevated));
+        foreach (var i in report.Items.Where(i => i.Ok))
+            if (byLocation.TryGetValue(i.Location, out var node)) _removed.Add(RemovedItem.From(node, i.FileOutcome));
         _deletedFiles += report.Items.Count(i => i.Ok && i.FileOutcome != DeleteOutcome.ScheduledForReboot);
         _rebootPending += report.ScheduledForReboot;
         _failed += report.Failed;
@@ -411,6 +429,20 @@ public partial class UninstallWizard : Window
         Ui.SaveSettings();
         foreach (var f in _result!.Files.Where(f => FileOps.IsSameOrUnder(f.FsPath!, folder))) { f.IsExcluded = true; f.IsChecked = false; }
         RefreshFilesTitle();
+    }
+
+    /// <summary>Runs slow work (registry backups, Recycle Bin moves) off the UI thread behind an overlay.</summary>
+    private async Task<T> RunBusyAsync<T>(string text, Func<T> work)
+    {
+        BusyText.Text = text;
+        BusyOverlay.Visibility = Visibility.Visible;
+        BackButton.IsEnabled = NextButton.IsEnabled = CloseButton.IsEnabled = false;
+        try { return await Task.Run(work); }
+        finally
+        {
+            BusyOverlay.Visibility = Visibility.Collapsed;
+            BackButton.IsEnabled = NextButton.IsEnabled = CloseButton.IsEnabled = true;
+        }
     }
 
     // ------------------------------------------------------------ navigation
@@ -478,16 +510,149 @@ public partial class UninstallWizard : Window
             DoneTitle.Text = _deletedRegistry + _deletedFiles > 0 ? "Uninstall complete" : "Done";
             DoneText.Text = _doneOverride;
             _doneOverride = null;
+        }
+        else
+        {
+            DoneTitle.Text = _failed > 0 ? "Finished with some items left behind" : "Uninstall complete";
+            var parts = new List<string> { $"{_deletedRegistry} registry item(s) and {_deletedFiles} file/folder item(s) removed." };
+            var remaining = (_result?.RegistryCount ?? 0) + (_result?.FileCount ?? 0);
+            if (remaining > 0) parts.Add($"{remaining} found item(s) were kept.");
+            if (_failed > 0) parts.Add($"{_failed} item(s) could not be removed.");
+            if (_rebootPending > 0) parts.Add($"{_rebootPending} item(s) will be removed after a restart.");
+            DoneText.Text = string.Join(" ", parts);
+        }
+        SetBadge(_failed > 0 ? "warn" : "ok");
+        _ = VerifyAsync();
+    }
+
+    private void SetBadge(string kind)
+    {
+        var (glyph, fg, bg) = kind switch
+        {
+            "warn" => ("", "WarningBrush", "WarningSoftBrush"),
+            "restart" => ("", "AccentBrush", "AccentSoftBrush"),
+            _ => ("", "SuccessBrush", "SuccessSoftBrush"),
+        };
+        DoneGlyph.Text = glyph;
+        DoneGlyph.SetResourceReference(TextBlock.ForegroundProperty, fg);
+        DoneBadge.SetResourceReference(Border.BackgroundProperty, bg);
+    }
+
+    /// <summary>
+    /// Confirms what is really gone: registration, install folder, running processes, each deleted item, and a
+    /// re-scan in the same mode. Runs in the background; the result replaces the optimistic summary.
+    /// </summary>
+    private async Task VerifyAsync()
+    {
+        _verifyCts?.Cancel();
+        var cts = _verifyCts = new CancellationTokenSource();
+        VerifyCard.Visibility = Visibility.Visible;
+        VerifyProgress.Visibility = Visibility.Visible;
+        VerifyAgainButton.IsEnabled = ScanAgainButton.IsEnabled = false;
+        VerdictText.Text = "Verifying…";
+        VerdictPill.SetResourceReference(Border.BackgroundProperty, "AccentSoftBrush");
+        VerifyList.ItemsSource = null;
+
+        var kept = new List<string>();
+        if (_result is not null)
+        {
+            kept.AddRange(_result.RegistryLeftovers.Select(n => n.Location));
+            kept.AddRange(_result.Files.Where(f => f.IsCreated).Select(f => f.Location));
+        }
+        var s = Ui.Settings.Uninstaller;
+        LeftoverScanner? scanner = null;
+        if (_result is not null && (_removed.Count > 0 || kept.Count > 0 || _lastMode == ScanMode.Safe))
+        {
+            var env = ScanEnvironment.CreateDefault();
+            env.OtherPrograms = _job.OtherPrograms;
+            scanner = new LeftoverScanner(env, s.RegistryExcludes, s.FolderExcludes);
+        }
+        var input = new UninstallVerifier.Input
+        {
+            Target = _job.Target,
+            StillRegistered = _job.StillInstalled,
+            Removed = _removed.ToList(),
+            Kept = kept,
+            Scanner = scanner,
+            // Never verify shallower than Moderate: a Safe scan does not look in app data or startup entries.
+            RescanMode = _lastMode == ScanMode.Safe ? ScanMode.Moderate : _lastMode,
+            ReviewedMode = _lastMode,
+            CheckProcesses = !_job.IsWindowsApp,
+        };
+        var progress = new Progress<string>(m => { if (!cts.IsCancellationRequested) VerifySummary.Text = m; });
+        VerificationReport report;
+        try { report = await Task.Run(() => new UninstallVerifier().Verify(input, cts.Token, progress)); }
+        catch (OperationCanceledException) { return; }
+        catch (Exception e)
+        {
+            VerifyProgress.Visibility = Visibility.Collapsed;
+            VerdictText.Text = "Not verified";
+            VerifySummary.Text = e.Message;
+            VerifyAgainButton.IsEnabled = ScanAgainButton.IsEnabled = true;
             return;
         }
-        DoneTitle.Text = _failed > 0 ? "Finished with some items left behind" : "Uninstall complete";
-        DoneGlyph.Text = _failed > 0 ? "" : "";
-        var parts = new List<string> { $"{_deletedRegistry} registry item(s) and {_deletedFiles} file/folder item(s) removed." };
-        var remaining = (_result?.RegistryCount ?? 0) + (_result?.FileCount ?? 0);
-        if (remaining > 0) parts.Add($"{remaining} found item(s) were kept.");
-        if (_failed > 0) parts.Add($"{_failed} item(s) could not be removed.");
-        if (_rebootPending > 0) parts.Add($"{_rebootPending} item(s) will be removed after a restart.");
-        DoneText.Text = string.Join(" ", parts);
+        if (cts.IsCancellationRequested) return;
+        ShowVerification(report);
+    }
+
+    private void ShowVerification(VerificationReport r)
+    {
+        VerifyProgress.Visibility = Visibility.Collapsed;
+        VerifyAgainButton.IsEnabled = ScanAgainButton.IsEnabled = true;
+        int removed = r.Count(VerificationStatus.Removed), present = r.Count(VerificationStatus.StillPresent),
+            pending = r.Count(VerificationStatus.PendingRestart), kept = r.Count(VerificationStatus.Kept);
+        (string text, string pill) = r.Verdict switch
+        {
+            VerificationVerdict.Clean => ("Verified clean", "SuccessSoftBrush"),
+            VerificationVerdict.CleanAfterRestart => ("Clean after restart", "AccentSoftBrush"),
+            VerificationVerdict.LeftoversKept => ("Verified · items kept", "SuccessSoftBrush"),
+            _ => ($"{present} item(s) still present", "WarningSoftBrush"),
+        };
+        VerdictText.Text = text;
+        VerdictPill.SetResourceReference(Border.BackgroundProperty, pill);
+        var parts = new List<string> { $"{removed} confirmed removed" };
+        if (pending > 0) parts.Add($"{pending} pending restart");
+        if (kept > 0) parts.Add($"{kept} kept by you");
+        if (present > 0) parts.Add($"{present} still present");
+        VerifySummary.Text = string.Join(" · ", parts) + $" · checked in {r.Duration.TotalSeconds:0.0} s" + (r.RescanError is null ? "" : " · re-scan failed: " + r.RescanError);
+
+        switch (r.Verdict)
+        {
+            case VerificationVerdict.ItemsRemain:
+                DoneTitle.Text = "Some items are still present";
+                SetBadge("warn");
+                break;
+            case VerificationVerdict.CleanAfterRestart:
+                DoneTitle.Text = "Restart Windows to finish";
+                SetBadge("restart");
+                break;
+            default:
+                DoneTitle.Text = r.Verdict == VerificationVerdict.Clean ? "Uninstall complete and verified" : "Uninstall complete";
+                SetBadge("ok");
+                break;
+        }
+
+        Brush B(string key) => (Brush)FindResource(key);
+        // Problems first, then what was kept, then the confirmations.
+        VerifyList.ItemsSource = r.Checks
+            .OrderBy(c => c.Status switch { VerificationStatus.StillPresent => 0, VerificationStatus.PendingRestart => 1, VerificationStatus.Kept => 2, _ => 3 })
+            .Select(c => c.Status switch
+            {
+                VerificationStatus.Removed => new VerifyRow("", "Removed", c.Location, c.Detail, B("SuccessBrush")),
+                VerificationStatus.PendingRestart => new VerifyRow("", "After restart", c.Location, c.Detail, B("AccentBrush")),
+                VerificationStatus.Kept => new VerifyRow("", "Kept", c.Location, c.Detail, B("MutedTextBrush")),
+                _ => new VerifyRow("", "Still present", c.Location, c.Detail, B("WarningBrush")),
+            }).ToList();
+    }
+
+    private async void VerifyAgain_Click(object sender, RoutedEventArgs e) => await VerifyAsync();
+
+    private async void ScanAgain_Click(object sender, RoutedEventArgs e)
+    {
+        _verifyCts?.Cancel();
+        ModeCard.Visibility = Visibility.Visible;
+        if (_lastMode == ScanMode.Safe) ModeModerate.IsChecked = true;   // show what verification found
+        await ScanAsync();
     }
 
     private async void Next_Click(object sender, RoutedEventArgs e)
@@ -540,5 +705,6 @@ public partial class UninstallWizard : Window
         }
         _waitCts?.Cancel();
         _scanCts?.Cancel();
+        _verifyCts?.Cancel();
     }
 }

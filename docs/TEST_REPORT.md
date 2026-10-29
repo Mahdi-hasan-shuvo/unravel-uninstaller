@@ -5,6 +5,20 @@
 **Rights:** tests ran as a standard user (not elevated). The original Revo Uninstaller 2.6.8 was open,
 elevated, on the same desktop.
 
+## Update 1.1: verification, speed, responsiveness
+
+| Suite | Result |
+|---|---|
+| Release build | **0 warnings, 0 errors** |
+| Automated tests | **226 passed, 0 failed**, 3 skipped (two diagnostics, opt-in with `UNRAVEL_DIAG=1`; the opt-in live WinGet test) |
+| Post-uninstall verification (UI) | Moderate: *Verified clean*, 8/8 checks removed, matching `demo_check.ps1` (9/9 parts gone). Safe: flagged exactly the 3 items `demo_check.ps1` still found (Run value, AppData folder, publisher folder); **Scan again** removed them and re-verification reported clean. Advanced: 9 removed, 1 Low-confidence Windows-owned key correctly reported as *Kept*. |
+| Button sweep (`button_sweep.ps1`) | 37 non-destructive buttons and tabs pressed on 17 pages, every dialog closed: **0 error dialogs, 0 application errors logged, no crash** |
+| UI-thread stall probe (`freeze_probe.ps1`) | Every page and scan: max stall 180 ms (first open of Live monitor), steady state 16 ms; deletions in the wizard now run off the UI thread |
+| Layout (`layout_check.ps1`) | All 18 pages at the 980 × 600 minimum and at 1440 × 860: fixed overlapping toolbars (Programs, Package manager, Secure delete), the collapsed Duplicates toolbar, monitor card text under the percentages, multi-line activity-log rows |
+| Install tracker regression (`e2e_tracker.ps1`) | Snapshot 13 s in the app (was 32–37 s); cleanup 9/9, undo 9/9 |
+
+Timings on this PC (113 programs, `Timings` diagnostic): inventory 35 ms; leftover scan average 311 ms Safe, 518 ms Moderate, 1,495 ms Advanced (max 2.1 s, Docker Desktop); install-tracker snapshot of 900,869 files and 469,772 keys **10.6 s, down from 31.6 s** with the same item count.
+
 ## Update: six added features (later the same day)
 
 | Suite | Result |
