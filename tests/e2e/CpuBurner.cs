@@ -1,7 +1,6 @@
 // Busy-loops on most cores for a limited time; used to trigger the live monitor's sustained-CPU alert.
 using System;
 using System.Threading;
-
 static class CpuBurner
 {
     static void Main(string[] args)
