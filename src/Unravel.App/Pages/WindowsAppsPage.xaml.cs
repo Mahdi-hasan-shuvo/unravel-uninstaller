@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
@@ -59,6 +59,7 @@ public partial class WindowsAppsPage : UserControl, IPage
         _cts = new CancellationTokenSource();
         var ct = _cts.Token;
         LoadingState.Visibility = Visibility.Visible;
+        _ = CheckLinksAsync();
         var opts = new WindowsAppOptions { IncludeFrameworks = ShowSystem.IsChecked == true, IncludeSystemApps = ShowSystem.IsChecked == true };
         List<WindowsApp> apps;
         try { apps = await Task.Run(() => WindowsApps.List(opts), ct); }
@@ -81,6 +82,36 @@ public partial class WindowsAppsPage : UserControl, IPage
         _ = WindowsApps.ComputeSizesAsync(list.Select(i => i.App), a => Dispatcher.BeginInvoke(() => list.FirstOrDefault(i => i.App == a)?.SizeChanged()), ct);
     }
 
+    // ------------------------------------------------------------ links Windows opens that nothing handles
+
+    private SystemLinkIssue? _linkIssue;
+
+    private async Task CheckLinksAsync()
+    {
+        List<SystemLinkIssue> issues;
+        // The WinRT launcher query runs on a pool thread: WPF's UI thread is single-threaded (STA).
+        try { issues = await Task.Run(() => SystemLinkHealth.CheckAsync()); }
+        catch (Exception e) { Core.Logging.ActivityLog.Warning("Windows apps", "Could not check Windows' link handlers: " + e.Message); return; }
+        _linkIssue = issues.FirstOrDefault(i => !Ui.Settings.DismissedLinkIssues.Contains(i.Scheme, StringComparer.OrdinalIgnoreCase));
+        LinkIssueCard.Visibility = _linkIssue is null ? Visibility.Collapsed : Visibility.Visible;
+        if (_linkIssue is not { } issue) return;
+        LinkTitle.Text = $"Why Windows says \"You'll need a new app to open this {issue.Scheme} link\"";
+        LinkText.Text = issue.Explanation;
+        LinkGetApp.Content = $"Get {issue.AppName}";
+    }
+
+    private void LinkGetApp_Click(object s, RoutedEventArgs e) { if (_linkIssue is { } i) Ui.Try("Open Microsoft Store", () => Shell.OpenUrl(i.StoreUrl)); }
+    private void LinkSettings_Click(object s, RoutedEventArgs e) { if (_linkIssue is { } i) Ui.Try("Open Windows Settings", () => Shell.OpenUrl(i.SettingsUrl)); }
+    private void LinkCheck_Click(object s, RoutedEventArgs e) => _ = CheckLinksAsync();
+
+    private void LinkDismiss_Click(object s, RoutedEventArgs e)
+    {
+        if (_linkIssue is not { } i) return;
+        Ui.Settings.DismissedLinkIssues.Add(i.Scheme);
+        Ui.SaveSettings();
+        LinkIssueCard.Visibility = Visibility.Collapsed;
+    }
+
     private void UpdateCount() => CountText.Text = $"{_view.Cast<object>().Count()} of {_items.Count} apps · packaged apps installed for your account";
 
     private AppItem? Selected => Grid.SelectedItem as AppItem;
@@ -100,10 +131,15 @@ public partial class WindowsAppsPage : UserControl, IPage
     private void Uninstall_Click(object sender, RoutedEventArgs e)
     {
         if (Selected?.App is not { } app) return;
-        var warn = app.IsSystem || app.IsFramework
-            ? $"\"{app.Name}\" is a system app or framework that other apps may need. Windows may refuse to remove it.\n\nContinue?"
+        if (app.IsNonRemovable) { Ui.Info("Part of Windows", $"\"{app.Name}\" is part of Windows and can't be uninstalled."); return; }
+        var warn = app.IsFramework
+            ? $"\"{app.Name}\" is a framework that other apps may need. Windows may refuse to remove it.\n\nContinue?"
             : $"Uninstall \"{app.Name}\"?";
-        if (!Ui.Confirm("Uninstall app", warn, "Uninstall", app.IsSystem || app.IsFramework)) return;
+        // Removing the app that handles a link Windows itself opens is what produces "You'll need a new app to open this link".
+        var links = WindowsApps.ReadProtocols(app.InstallLocation).Where(p => p.StartsWith("ms-", StringComparison.OrdinalIgnoreCase)).OrderBy(p => p).Take(5).ToList();
+        if (links.Count > 0)
+            warn += $"\n\nWindows and other apps open it through these links: {string.Join(", ", links)}. After removal they can show \"You'll need a new app to open this link\" until it is reinstalled.";
+        if (!Ui.Confirm("Uninstall app", warn, "Uninstall", app.IsFramework || links.Count > 0)) return;
         var others = _items.Where(i => i.App != app).Select(i => (i.Name, "")).ToList();
         var wizard = new UninstallWizard(UninstallJob.ForWindowsApp(app, others)) { Owner = Window.GetWindow(this) };
         wizard.ShowDialog();

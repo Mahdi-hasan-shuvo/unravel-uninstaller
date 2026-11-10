@@ -42,7 +42,7 @@ public sealed class ScanTarget
             DisplayName = p.DisplayName,
             Publisher = p.Publisher,
             InstallFolder = folder,
-            UninstallKey = p.RegistryKey,
+            UninstallKey = p.IsWindowsInstallerRecord ? null : p.RegistryKey,
             KeyName = p.KeyName,
             MsiProductCode = p.MsiProductCode,
             Executables = exes,
@@ -95,6 +95,8 @@ public sealed class ScanEnvironment
 
     /// <summary>Install folders of every other installed program; used to avoid offering shared folders.</summary>
     public List<(string Name, string Folder)> OtherPrograms { get; set; } = [];
+    /// <summary>Lists the PC's scheduled tasks; null skips them.</summary>
+    public Func<IReadOnlyList<Tracking.ScheduledTaskInfo>>? ScheduledTaskSource { get; set; }
 
     /// <summary>Folders that must never be offered for deletion even if a name matches.</summary>
     public List<string> ProtectedFolders { get; init; } = [];
@@ -156,6 +158,7 @@ public sealed class ScanEnvironment
             DesktopRoots = [F(Environment.SpecialFolder.DesktopDirectory), F(Environment.SpecialFolder.CommonDesktopDirectory)],
             TempRoots = [Path.GetTempPath().TrimEnd('\\')],
             PackagesDataRoot = Path.Combine(local, "Packages"),
+            ScheduledTaskSource = Tracking.ScheduledTasks.List,
         };
         env.ProtectedFolders.AddRange(DefaultProtectedFolders());
         return env;

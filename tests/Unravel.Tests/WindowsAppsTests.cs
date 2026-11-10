@@ -11,7 +11,7 @@ public class WindowsAppsTests
         var apps = WindowsApps.List(new WindowsAppOptions());
         Assert.NotEmpty(apps);
         Assert.DoesNotContain(apps, a => a.IsFramework);
-        Assert.DoesNotContain(apps, a => a.IsSystem);
+        Assert.All(apps.Where(a => a.IsSystem), a => Assert.True(a.CanLaunch));   // only parts of Windows the user can start
         Assert.All(apps, a =>
         {
             Assert.False(string.IsNullOrWhiteSpace(a.Name));

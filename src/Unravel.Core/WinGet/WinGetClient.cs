@@ -12,6 +12,8 @@ public sealed record WinGetPackage(string Name, string Id, string Version, strin
     public bool IsLocalOnly => Id.StartsWith(@"ARP\", StringComparison.OrdinalIgnoreCase) || Id.StartsWith(@"MSIX\", StringComparison.OrdinalIgnoreCase);
     /// <summary>For ARP entries, the uninstall registry key name (ARP\Machine\X64\{key}).</summary>
     public string? ArpKeyName => Id.StartsWith(@"ARP\", StringComparison.OrdinalIgnoreCase) ? Id.Split('\\').Last() : null;
+    /// <summary>Older WinGet versions cut long IDs at the 120 columns they assume when output is redirected.</summary>
+    public bool IsIdTruncated => Id.EndsWith(WinGetParser.Ellipsis);
 }
 
 public sealed record WinGetResult(int ExitCode, string Output, string Message)
@@ -28,10 +30,12 @@ public enum WinGetScope { Any, User, Machine }
 public sealed class WinGetClient
 {
     public string Executable { get; }
+    private readonly Func<string, IProgress<string>?, CancellationToken, Task<WinGetResult>>? _runner;
 
-    public WinGetClient(string? executable = null)
+    public WinGetClient(string? executable = null, Func<string, IProgress<string>?, CancellationToken, Task<WinGetResult>>? runner = null)
     {
         Executable = executable ?? Locate() ?? "winget.exe";
+        _runner = runner;
     }
 
     public static string? Locate()
@@ -58,39 +62,36 @@ public sealed class WinGetClient
     public async Task<List<WinGetPackage>> ListInstalledAsync(CancellationToken ct = default)
     {
         var r = await RunAsync($"list {Agreements}", null, ct);
-        EnsureOk(r, allowNoResults: true);
-        return WinGetParser.ParsePackages(r.Output, WinGetParser.Command.List);
+        return Rows(r, WinGetParser.Command.List);
     }
 
     public async Task<List<WinGetPackage>> ListUpgradesAsync(CancellationToken ct = default)
     {
         var r = await RunAsync($"upgrade {Agreements}", null, ct);
-        EnsureOk(r, allowNoResults: true);
-        return WinGetParser.ParsePackages(r.Output, WinGetParser.Command.Upgrade).Where(p => p.HasUpdate).ToList();
+        return Rows(r, WinGetParser.Command.Upgrade).Where(p => p.HasUpdate).ToList();
     }
 
     public async Task<List<WinGetPackage>> SearchAsync(string query, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(query)) throw new ArgumentException("Enter a name or ID to search for.");
         var r = await RunAsync($"search {Quote(query)} {Agreements}", null, ct);
-        EnsureOk(r, allowNoResults: true);
-        return WinGetParser.ParsePackages(r.Output, WinGetParser.Command.Search);
+        return Rows(r, WinGetParser.Command.Search);
     }
 
     public Task<WinGetResult> ShowAsync(string id, CancellationToken ct = default) =>
-        RunAsync($"show --id {Quote(id)} --exact {Agreements}", null, ct);
+        WithFullId(id, "search", full => RunAsync($"show --id {Quote(full)} --exact {Agreements}", null, ct), ct);
 
     public Task<WinGetResult> InstallAsync(string id, string? version = null, WinGetScope scope = WinGetScope.Any, bool silent = true, IProgress<string>? progress = null, CancellationToken ct = default) =>
-        Logged("Install", id, RunAsync($"install --id {Quote(id)} --exact {Version(version)}{Scope(scope)}{(silent ? "--silent " : "")}--accept-package-agreements {Agreements}", progress, ct));
+        Logged("Install", id, WithFullId(id, "search", full => RunAsync($"install --id {Quote(full)} --exact {Version(version)}{Scope(scope)}{(silent ? "--silent " : "")}--accept-package-agreements {Agreements}", progress, ct), ct));
 
     public Task<WinGetResult> UpgradeAsync(string id, bool silent = true, IProgress<string>? progress = null, CancellationToken ct = default) =>
-        Logged("Update", id, RunAsync($"upgrade --id {Quote(id)} --exact {(silent ? "--silent " : "")}--accept-package-agreements {Agreements}", progress, ct));
+        Logged("Update", id, WithFullId(id, "list", full => RunAsync($"upgrade --id {Quote(full)} --exact {(silent ? "--silent " : "")}--accept-package-agreements {Agreements}", progress, ct), ct));
 
     public Task<WinGetResult> UpgradeAllAsync(bool silent = true, IProgress<string>? progress = null, CancellationToken ct = default) =>
         Logged("Update all", "*", RunAsync($"upgrade --all {(silent ? "--silent " : "")}--accept-package-agreements {Agreements}", progress, ct));
 
     public Task<WinGetResult> UninstallAsync(string id, bool silent = true, IProgress<string>? progress = null, CancellationToken ct = default) =>
-        Logged("Uninstall", id, RunAsync($"uninstall --id {Quote(id)} --exact {(silent ? "--silent " : "")}{Agreements}", progress, ct));
+        Logged("Uninstall", id, WithFullId(id, "list", full => RunAsync($"uninstall --id {Quote(full)} --exact {(silent ? "--silent " : "")}{Agreements}", progress, ct), ct));
 
     public async Task<WinGetResult> ExportAsync(string file, CancellationToken ct = default)
     {
@@ -129,11 +130,28 @@ public sealed class WinGetClient
         return r;
     }
 
-    private static void EnsureOk(WinGetResult r, bool allowNoResults)
+    /// <summary>The table WinGet printed. A failure only counts when it left nothing to show (one source can fail while the rest answer).</summary>
+    private static List<WinGetPackage> Rows(WinGetResult r, WinGetParser.Command command)
     {
-        if (r.Ok) return;
-        if (allowNoResults && r.ExitCode == WinGetErrors.NoApplicationsFound) return;
-        throw new InvalidOperationException(r.Message);
+        var rows = WinGetParser.ParsePackages(r.Output, command);
+        if (r.Ok || r.ExitCode == WinGetErrors.NoApplicationsFound) return rows;
+        if (rows.Count == 0) throw new InvalidOperationException(r.Message);
+        ActivityLog.Warning("WinGet", $"Listed {rows.Count} package(s), but WinGet also reported a problem: {r.Message}");
+        return rows;
+    }
+
+    /// <summary>Runs an action with the package's complete ID; a shortened ID is looked up first and is never passed on.</summary>
+    private async Task<WinGetResult> WithFullId(string id, string lookupVerb, Func<string, Task<WinGetResult>> action, CancellationToken ct)
+    {
+        if (!id.EndsWith(WinGetParser.Ellipsis)) return await action(id);
+        var prefix = id.TrimEnd(WinGetParser.Ellipsis);
+        var r = await RunAsync($"{lookupVerb} --id {Quote(prefix)} {Agreements}", null, ct);
+        var command = lookupVerb == "search" ? WinGetParser.Command.Search : WinGetParser.Command.List;
+        var matches = WinGetParser.ParsePackages(r.Output, command)
+            .Where(p => !p.IsIdTruncated && p.Id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .Select(p => p.Id).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (matches.Count == 1) return await action(matches[0]);
+        return new WinGetResult(-3, r.Output, $"WinGet shortened this package's ID to \"{id}\" and the full ID could not be determined. Update App Installer from the Microsoft Store and try again.");
     }
 
     private static string Quote(string s) => "\"" + s.Replace("\"", "") + "\"";
@@ -143,6 +161,7 @@ public sealed class WinGetClient
     /// <summary>Runs winget with the given arguments, streaming cleaned output lines to <paramref name="progress"/>.</summary>
     public async Task<WinGetResult> RunAsync(string arguments, IProgress<string>? progress, CancellationToken ct)
     {
+        if (_runner is not null) return await _runner(arguments, progress, ct);
         var psi = new ProcessStartInfo(Executable, arguments)
         {
             UseShellExecute = false, CreateNoWindow = true,
@@ -191,12 +210,22 @@ public static class WinGetErrors
 {
     public const int NoApplicationsFound = unchecked((int)0x8A150014);
 
-    // Only codes whose meaning is certain are mapped; anything else shows WinGet's own message and the code.
+    // Taken from Microsoft's "winget return codes" table. Anything else shows WinGet's own message and the code.
     private static readonly Dictionary<uint, string> Messages = new()
     {
-        [0x8A150011] = "More than one package matches. Use an exact package ID.",
+        [0x8A150002] = "This version of WinGet doesn't understand the command Unravel sent. Update App Installer from the Microsoft Store.",
+        [0x8A150010] = "No installer for this package fits this PC.",
+        [0x8A150011] = "The downloaded installer's hash doesn't match the package manifest, so WinGet refused to run it.",
         [0x8A150014] = "No package matches.",
+        [0x8A150015] = "WinGet has no package sources configured.",
+        [0x8A150016] = "More than one package matches. Use an exact package ID.",
+        [0x8A150017] = "No package manifest matches.",
         [0x8A15002B] = "No applicable update was found.",
+        [0x8A15002C] = "Some updates failed. See the output for which ones.",
+        [0x8A150030] = "The program's uninstall command failed.",
+        [0x8A150045] = "WinGet could not open a package source. Check the internet connection and try again.",
+        [0x8A150061] = "This package is already installed.",
+        [0x8A150068] = "A pin stops this package from being updated.",
         [0x8A150101] = "The program is in use. Close it and try again.",
         [0x8A150102] = "Another installation is in progress. Wait for it to finish.",
         [0x8A150103] = "A file the installer needs is in use.",
@@ -236,6 +265,8 @@ public static class WinGetErrors
 public static class WinGetParser
 {
     public enum Command { List, Upgrade, Search }
+
+    public const char Ellipsis = '\u2026';
 
     private static readonly Regex Spinner = new(@"^[\s\-\\|/]+$");
     private static readonly Regex ProgressBar = new(@"[█▒▓░]");
@@ -292,15 +323,17 @@ public static class WinGetParser
                 var row = lines[r];
                 if (row.Trim().Length == 0) break;
                 if (r + 1 < lines.Count && Regex.IsMatch(lines[r + 1], @"^-{10,}\s*$")) break; // next table's header
-                if (row.Length < starts[Math.Min(2, starts.Count - 1)]) break; // footer text ("31 upgrades available.")
+                if (DisplayWidth(row) < starts[Math.Min(2, starts.Count - 1)]) break; // footer text ("31 upgrades available.")
                 string Cell(int c)
                 {
-                    if (c < 0 || c >= starts.Count || starts[c] >= row.Length) return "";
-                    var end = c + 1 < starts.Count ? Math.Min(starts[c + 1], row.Length) : row.Length;
-                    return row[starts[c]..end].Trim();
+                    if (c < 0 || c >= starts.Count) return "";
+                    int from = IndexAtColumn(row, starts[c]);
+                    int to = c + 1 < starts.Count ? IndexAtColumn(row, starts[c + 1]) : row.Length;
+                    return row[from..to].Trim();
                 }
                 var id = Cell(idCol);
-                if (id.Length == 0 || id.Contains(' ')) continue;
+                // ARP entries use the registry key name as their ID, which may contain spaces; a space in anything else is a sentence.
+                if (id.Length == 0 || (id.Contains(' ') && !IsLocalId(id))) continue;
                 var name = Cell(nameCol);
                 result.Add(new WinGetPackage(name, id, Cell(verCol), availCol >= 0 ? NullIfEmpty(Cell(availCol)) : null, srcCol >= 0 ? NullIfEmpty(Cell(srcCol)) : null));
             }
@@ -310,12 +343,47 @@ public static class WinGetParser
 
     private static string? NullIfEmpty(string s) => string.IsNullOrWhiteSpace(s) ? null : s;
 
-    /// <summary>Start index of each header word (columns are separated by at least one space).</summary>
+    private static bool IsLocalId(string id) => id.StartsWith(@"ARP\", StringComparison.OrdinalIgnoreCase) || id.StartsWith(@"MSIX\", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Display column of each header word (columns are separated by at least one space).</summary>
     internal static List<int> ColumnStarts(string header)
     {
         var starts = new List<int>();
-        for (int i = 0; i < header.Length; i++)
-            if (header[i] != ' ' && (i == 0 || header[i - 1] == ' ')) starts.Add(i);
+        int column = 0;
+        bool previousIsSpace = true;
+        foreach (var rune in header.EnumerateRunes())
+        {
+            bool space = rune.Value == ' ';
+            if (!space && previousIsSpace) starts.Add(column);
+            previousIsSpace = space;
+            column += RuneWidth(rune.Value);
+        }
         return starts;
     }
+
+    // WinGet pads its tables by display width, so East Asian characters count as two columns.
+    internal static int DisplayWidth(string text)
+    {
+        int width = 0;
+        foreach (var rune in text.EnumerateRunes()) width += RuneWidth(rune.Value);
+        return width;
+    }
+
+    /// <summary>The string index of the first character at or after a display column.</summary>
+    private static int IndexAtColumn(string text, int column)
+    {
+        int width = 0, index = 0;
+        foreach (var rune in text.EnumerateRunes())
+        {
+            if (width >= column) return index;
+            width += RuneWidth(rune.Value);
+            index += rune.Utf16SequenceLength;
+        }
+        return text.Length;
+    }
+
+    private static int RuneWidth(int c) =>
+        c is >= 0x0300 and <= 0x036F or >= 0x200B and <= 0x200F or >= 0xFE00 and <= 0xFE0F ? 0 :
+        c is >= 0x1100 and <= 0x115F or >= 0x2E80 and <= 0x303E or >= 0x3041 and <= 0xA4CF or >= 0xAC00 and <= 0xD7A3 or >= 0xF900 and <= 0xFAFF
+          or >= 0xFE30 and <= 0xFE6F or >= 0xFF00 and <= 0xFF60 or >= 0xFFE0 and <= 0xFFE6 or >= 0x1F300 and <= 0x1FAFF or >= 0x20000 and <= 0x3FFFD ? 2 : 1;
 }

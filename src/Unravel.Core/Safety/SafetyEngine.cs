@@ -17,6 +17,7 @@ public enum RiskFlags
     ContainsExecutables = 32,
     AffectsWindowsService = 64,
     RecentlyUsed = 128,
+    ProgramStillInstalled = 256,
 }
 
 /// <summary>Why something was found. The category drives the base confidence.</summary>
@@ -27,7 +28,7 @@ public enum FindingCategory
     StartupEntry, StartupFlag, AppPath, Service, FileAssociation, SharedDll, FirewallRule, NameCache,
     DeepNameMatch, ComRegistration, ShellExtension, AppPackageData,
     InstallFolder, Shortcut, StartMenuFolder, DataFolder, PublisherFolder, DeepFolderMatch,
-    TrackedInstallChange, TrackedInWindowsArea, DuplicateFile, OrphanCandidate,
+    TrackedInstallChange, TrackedInWindowsArea, DuplicateFile, OrphanCandidate, ScheduledTask,
 }
 
 public sealed record SafetyAssessment(Confidence Confidence, RiskFlags Risks, string Explanation)
@@ -38,7 +39,7 @@ public sealed record SafetyAssessment(Confidence Confidence, RiskFlags Risks, st
     /// <summary>Only these are ever pre-selected or selected by "Select all".</summary>
     public bool IsSafeToAutoSelect =>
         !IsBlocked && Confidence != Confidence.Low &&
-        (Risks & (RiskFlags.SharedWithOtherProgram | RiskFlags.InUse | RiskFlags.MicrosoftSigned | RiskFlags.NotCreatedByProgram)) == 0;
+        (Risks & (RiskFlags.SharedWithOtherProgram | RiskFlags.InUse | RiskFlags.MicrosoftSigned | RiskFlags.NotCreatedByProgram | RiskFlags.ProgramStillInstalled)) == 0;
 
     public string ConfidenceText => IsBlocked ? "Blocked" : Confidence.ToString();
 
@@ -76,6 +77,7 @@ public static class SafetyEngine
         [FindingCategory.WindowsInstallerComponent] = Confidence.Medium,
         [FindingCategory.ComRegistration] = Confidence.Medium,
         [FindingCategory.ShellExtension] = Confidence.Medium,
+        [FindingCategory.ScheduledTask] = Confidence.Medium,
         [FindingCategory.DeepNameMatch] = Confidence.Low,
         [FindingCategory.DeepFolderMatch] = Confidence.Low,
         [FindingCategory.OrphanCandidate] = Confidence.Low,
@@ -243,6 +245,15 @@ public static class SafetyEngine
         return new(c, risks, string.Join("; ", why) + ".");
     }
 
+    public static SafetyAssessment AssessScheduledTask(string taskPath, bool created)
+    {
+        if (taskPath.StartsWith(@"\Microsoft\", StringComparison.OrdinalIgnoreCase))
+            return new(Confidence.Low, RiskFlags.SystemCritical, "Windows' own scheduled task – protected.");
+        return created
+            ? new(BaseFor(FindingCategory.ScheduledTask), RiskFlags.None, Describe(FindingCategory.ScheduledTask) + ".")
+            : new(Confidence.Low, RiskFlags.NotCreatedByProgram, "Not identified as created by the program.");
+    }
+
     private static bool IsExecutable(string p) =>
         p.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".sys", StringComparison.OrdinalIgnoreCase);
 
@@ -285,6 +296,7 @@ public static class SafetyEngine
         FindingCategory.TrackedInWindowsArea => "Appeared in Windows' own settings while the install was recorded – Windows may have made it",
         FindingCategory.DuplicateFile => "Identical copy of another file (same SHA-256)",
         FindingCategory.OrphanCandidate => "No installed program or Windows component references it",
+        FindingCategory.ScheduledTask => "Scheduled task that runs a file of the program",
         _ => "Matched by name",
     };
 }

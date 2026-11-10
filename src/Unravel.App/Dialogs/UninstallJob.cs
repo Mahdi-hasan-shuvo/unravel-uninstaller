@@ -8,7 +8,7 @@ namespace Unravel.App.Dialogs;
 
 public enum UninstallerOutcome { Finished, StartFailed, Cancelled, SkippedWaiting }
 
-public sealed record UninstallerResult(UninstallerOutcome Outcome, string? Message = null);
+public sealed record UninstallerResult(UninstallerOutcome Outcome, string? Message = null, UninstallerExit? Exit = null);
 
 /// <summary>What the wizard uninstalls: a desktop program (registry entry) or a packaged Windows app.</summary>
 public sealed class UninstallJob
@@ -43,7 +43,15 @@ public sealed class UninstallJob
             int pid;
             try { pid = proc.Id; } catch { return new(UninstallerOutcome.Finished); }
             await ProcessUtil.WaitForProcessTreeAsync(pid, ct);
-            return ct.IsCancellationRequested ? new(UninstallerOutcome.SkippedWaiting) : new(UninstallerOutcome.Finished);
+            if (ct.IsCancellationRequested) return new(UninstallerOutcome.SkippedWaiting);
+            // The exit code is the only way to tell a finished uninstall from a failed or cancelled one.
+            try
+            {
+                if (!proc.HasExited) return new(UninstallerOutcome.Finished);
+                var info = ProgramActions.InterpretExitCode(proc.ExitCode, proc.StartInfo.FileName.Contains("msiexec", StringComparison.OrdinalIgnoreCase));
+                return new(UninstallerOutcome.Finished, info.Message, info.Kind);
+            }
+            catch (InvalidOperationException) { return new(UninstallerOutcome.Finished); }
         },
     };
 

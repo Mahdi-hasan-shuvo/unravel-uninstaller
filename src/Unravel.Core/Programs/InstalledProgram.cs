@@ -3,13 +3,18 @@ using Unravel.Core.Util;
 namespace Unravel.Core.Programs;
 
 public enum ProgramKind { Program, SystemComponent, Update }
-public enum InstallScope { AllUsers, CurrentUser }
+public enum InstallScope { AllUsers, CurrentUser, OtherUser }
 
 public sealed class InstalledProgram
 {
     public required string DisplayName { get; init; }
     public required RegPath RegistryKey { get; init; }
-    public string KeyName => RegistryKey.Name;
+    public string KeyName => _keyName ?? RegistryKey.Name;
+    private readonly string? _keyName;
+    /// <summary>Set when the registry key's own name is not the program's identity (Windows Installer records use the product code).</summary>
+    public string? KeyNameOverride { init => _keyName = value; }
+    /// <summary>The entry is Windows Installer's own record of a per-user product, not an Uninstall key: Windows Installer alone may change it.</summary>
+    public bool IsWindowsInstallerRecord { get; init; }
     public string? Version { get; init; }
     public string? Publisher { get; init; }
     public string? InstallLocation { get; init; }
@@ -39,7 +44,7 @@ public sealed class InstalledProgram
     public string? MsiProductCode =>
         IsMsi && CommandLine.IsGuid(KeyName) ? KeyName.ToUpperInvariant() : CommandLine.ExtractMsiProductCode(UninstallString);
 
-    public string Bitness => Scope == InstallScope.CurrentUser ? "User" : Is64Bit ? "64-bit" : "32-bit";
+    public string Bitness => Scope == InstallScope.OtherUser ? "Other user" : Scope == InstallScope.CurrentUser ? "User" : Is64Bit ? "64-bit" : "32-bit";
 
     public string TypeText => Kind switch
     {

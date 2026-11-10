@@ -123,6 +123,7 @@ public sealed class AppSettings
     public UninstallerSettings Uninstaller { get; set; } = new();
     public JunkSettings Junk { get; set; } = new();
     public HunterSettings Hunter { get; set; } = new();
+    public List<string> DismissedLinkIssues { get; set; } = [];
     public Dictionary<string, int> DisabledServiceStartTypes { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 

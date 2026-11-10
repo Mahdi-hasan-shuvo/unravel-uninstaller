@@ -455,6 +455,128 @@ public class LeftoverScannerTests : IDisposable
         });
         Assert.Equal(VerificationVerdict.CleanAfterRestart, pendingOnly.Verdict);
     }
+
+    // ------------------------------------------------------------ findings must rest on evidence, not on a file name
+
+    [Fact]
+    public void AnApplicationsEntryOfAnotherProgramWithTheSameExeNameIsNotClaimed()
+    {
+        // Burp Suite bundles java.exe; Classes\Applications\java.exe belongs to the JDK.
+        var jdk = @"C:\Program Files\Java\jdk\bin\java.exe";
+        _sb.CreateKey(@"Classes\Applications\java.exe\shell\open\command", ("", $"\"{jdk}\" \"%1\""));
+        var bundled = Path.Combine(_installDir, "java.exe");
+        File.WriteAllText(bundled, "MZ");
+        var t = new ScanTarget { DisplayName = _target.DisplayName, InstallFolder = _installDir, Executables = [_exe, bundled] };
+        var c = Created(new LeftoverScanner(_env).Scan(t, ScanMode.Moderate));
+        Assert.DoesNotContain(K(@"Classes\Applications\java.exe"), c);
+        Assert.Contains(K(@"Classes\Applications\widget.exe"), c);    // its command runs the program's own file
+    }
+
+    [Fact]
+    public void ItemsInsideAFolderAnotherProgramAlsoOwnsAreNotClaimed()
+    {
+        // pgAgent installs into PostgreSQL's folder: the PostgreSQL service and shortcuts are not pgAgent's leftovers.
+        var shared = _t.Dir("ProgramFiles", "PostgreSQL", "18");
+        var postgres = _t.File(@"ProgramFiles\PostgreSQL\18\pg_ctl.exe", "MZ");
+        _sb.CreateKey(@"Services\postgresql", ("ImagePath", $"\"{postgres}\" runservice"));
+        ShellLink.Create(_t.Path("StartMenu", "psql.lnk"), postgres);
+        var pgAgent = new ScanTarget { DisplayName = "pgAgent", InstallFolder = shared, Executables = [postgres] };
+        var env = _env;
+        env.OtherPrograms = [("PostgreSQL 18", shared)];
+        var c = Created(new LeftoverScanner(env).Scan(pgAgent, ScanMode.Moderate));
+        Assert.DoesNotContain(K(@"Services\postgresql"), c);
+        Assert.DoesNotContain(_t.Path("StartMenu", "psql.lnk"), c);
+    }
+
+    [Fact]
+    public void ItemsOfAPluginInstalledInsideTheProgramsFolderStayWithThePlugin()
+    {
+        var plugin = _t.Dir("ProgramFiles", "Contoso", "Widget", "plugins", "Other");
+        var pluginExe = _t.File(@"ProgramFiles\Contoso\Widget\plugins\Other\o.exe", "MZ");
+        _sb.CreateKey(@"Services\PluginSvc", ("ImagePath", $"\"{pluginExe}\""));
+        _env.OtherPrograms = [("Other Plugin", plugin)];
+        var c = Created(new LeftoverScanner(_env).Scan(_target, ScanMode.Moderate));
+        Assert.DoesNotContain(K(@"Services\PluginSvc"), c);
+        Assert.Contains(K(@"Services\WidgetSvc"), c);
+    }
+
+    [Fact]
+    public void NothingIsPreselectedWhileTheProgramIsStillInstalled()
+    {
+        var r = new LeftoverScanner(_env, checkByDefault: true).Scan(_target, ScanMode.Moderate);
+        Assert.Contains(r.Files, f => f.IsChecked);
+        r.MarkProgramStillInstalled();
+        var all = r.RegistryRoot.Descendants().Concat(r.Files).Where(n => n.IsCreated).ToList();
+        Assert.All(all, n =>
+        {
+            Assert.False(n.IsChecked);
+            Assert.False(n.Safety.IsSafeToAutoSelect);
+            Assert.Equal(Unravel.Core.Safety.Confidence.Low, n.Safety.Confidence);
+            Assert.True(n.Safety.Risks.HasFlag(Unravel.Core.Safety.RiskFlags.ProgramStillInstalled));
+        });
+    }
+
+    private static Unravel.Core.Tracking.ScheduledTaskInfo Task_(string path, string action) =>
+        new(path, path.Split('\\').Last(), true, null, [action], $"<Task><Path>{path}</Path></Task>");
+
+    [Fact]
+    public void ScheduledTasksThatRunTheProgramAreFoundButWindowsTasksNever()
+    {
+        _env.ScheduledTaskSource = () =>
+        [
+            Task_(@"\Widget Updater", $"\"{_exe}\" --update"),
+            Task_(@"\Microsoft\Windows\Widget", $"\"{_exe}\""),            // inside Windows' own task folder
+            Task_(@"\Other Task", @"C:\Other\o.exe"),
+        ];
+        var r = new LeftoverScanner(_env).Scan(_target, ScanMode.Moderate);
+        var tasks = r.Files.Where(f => f.Kind == LeftoverKind.ScheduledTask).ToList();
+        var t = Assert.Single(tasks);
+        Assert.Equal(@"\Widget Updater", t.Location);
+        Assert.True(t.IsCreated);
+        Assert.Equal(Unravel.Core.Safety.FindingCategory.ScheduledTask, t.Category);
+    }
+
+    [Fact]
+    public void SafeScansDoNotLookAtScheduledTasks()
+    {
+        _env.ScheduledTaskSource = () => [Task_(@"\Widget Updater", $"\"{_exe}\"")];
+        Assert.DoesNotContain(new LeftoverScanner(_env).Scan(_target, ScanMode.Safe).Files, f => f.Kind == LeftoverKind.ScheduledTask);
+    }
+
+    [Fact]
+    public void ScheduledTaskRemovalExportsTheTaskFirstAndVerificationLooksItUp()
+    {
+        var deleted = new List<string>();
+        _env.ScheduledTaskSource = () => [Task_(@"\Widget Updater", $"\"{_exe}\"")];
+        var r = new LeftoverScanner(_env).Scan(_target, ScanMode.Moderate);
+        var task = r.Files.Single(f => f.Kind == LeftoverKind.ScheduledTask);
+        task.IsChecked = true;
+        var backup = _t.Path("task-backup");
+        var report = LeftoverRemover.DeleteFiles([task], toRecycleBin: false, taskBackupFolder: backup,
+            taskOps: new LeftoverRemover.TaskOperations(p => "<Task/>", deleted.Add));
+        Assert.True(Assert.Single(report.Items).Ok);
+        Assert.Equal([@"\Widget Updater"], deleted);
+        Assert.Contains("<Task/>", File.ReadAllText(Directory.GetFiles(backup, "*.xml").Single()));
+
+        var gone = UninstallVerifier.CheckRemoved(RemovedItem.From(task), _ => false);
+        var back = UninstallVerifier.CheckRemoved(RemovedItem.From(task), _ => true);
+        Assert.Equal(VerificationStatus.Removed, gone.Status);
+        Assert.Equal(VerificationStatus.StillPresent, back.Status);
+    }
+
+    [Fact]
+    public void ATaskIsNotDeletedWhenItsBackupFails()
+    {
+        _env.ScheduledTaskSource = () => [Task_(@"\Widget Updater", $"\"{_exe}\"")];
+        var r = new LeftoverScanner(_env).Scan(_target, ScanMode.Moderate);
+        var task = r.Files.Single(f => f.Kind == LeftoverKind.ScheduledTask);
+        task.IsChecked = true;
+        var deleted = new List<string>();
+        var report = LeftoverRemover.DeleteFiles([task], false, taskBackupFolder: _t.Path("b"),
+            taskOps: new LeftoverRemover.TaskOperations(_ => throw new IOException("cannot export"), deleted.Add));
+        Assert.False(Assert.Single(report.Items).Ok);
+        Assert.Empty(deleted);
+    }
 }
 
 public class NameMatcherTests

@@ -11,7 +11,7 @@ A free, open-source uninstaller for Windows 10 and 11 with leftover scanning, in
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
 [![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows&logoColor=white)](#-system-requirements)
 [![.NET 8](https://img.shields.io/badge/.NET-8-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/download/dotnet/8.0)
-[![Tests](https://img.shields.io/badge/tests-226%20passing-22c55e)](docs/TEST_REPORT.md)
+[![Tests](https://img.shields.io/badge/tests-277%20passing-22c55e)](docs/TEST_REPORT.md)
 [![GitHub stars](https://img.shields.io/github/stars/Mahdi-hasan-shuvo/unravel-uninstaller?style=social)](https://github.com/Mahdi-hasan-shuvo/unravel-uninstaller/stargazers)
 
 [**Download**](https://github.com/Mahdi-hasan-shuvo/unravel-uninstaller/releases/latest) ·
@@ -57,7 +57,7 @@ Unravel runs the uninstaller **and then finds what it missed**, tells you how su
 
 ### 🗑️ Uninstaller
 
-- **Complete uninstall.** Lists every installed program (all users and current user, 64- and 32-bit) with icon, size, version, publisher and install date. Runs the uninstaller, waits for the whole process tree, then scans for leftovers.
+- **Complete uninstall.** Lists every installed program (all users and current user, 64- and 32-bit, including per-user Windows Installer products that have no Uninstall key) with icon, size, version, publisher and install date. Runs the uninstaller, waits for the whole process tree, then scans for leftovers.
 - **Three scan modes.** *Safe*, *Moderate* and *Advanced* control how deep the leftover search goes. Results appear as a registry tree and a file list.
 - **Post-uninstall verification.** After cleanup, Unravel checks everything again: whether Windows still lists the program, whether the install folder and its running processes are gone, whether every deleted key, value, file and folder is really gone, and a fresh re-scan (at least *Moderate*) for anything still findable. Each item is reported as *Removed*, *Still present*, *After restart* or *Kept*. If anything remains, **Scan again** takes you straight to it.
 - **Change, repair and forced MSI uninstall.** Run the installer's modify path, Windows Installer repair or forced removal, or remove a broken entry (with a backup).
@@ -301,7 +301,7 @@ git clone https://github.com/Mahdi-hasan-shuvo/unravel-uninstaller.git
 cd unravel-uninstaller
 dotnet build Unravel.sln
 dotnet run --project src/Unravel.App                  # start the app
-dotnet test tests/Unravel.Tests                       # 226 automated tests
+dotnet test tests/Unravel.Tests                       # 277 automated tests
 dotnet publish src/Unravel.App -c Release -o publish  # framework-dependent build
 ```
 
@@ -340,13 +340,13 @@ unravel-uninstaller/
 | Windows integration | Registry, Win32 P/Invoke (`NtQuerySystemInformation`, PDH, `WinVerifyTrust`, `SHFileOperation`), WinRT `PackageManager`, WMI restore points, Task Scheduler COM, UI Automation |
 | Data | System.Text.Json settings, Microsoft.Data.Sqlite for browser databases, compressed binary snapshots |
 | Package management | `winget.exe`, with a language-independent output parser |
-| Testing | xUnit (226 tests) and end-to-end UI Automation scripts |
+| Testing | xUnit (277 tests) and end-to-end UI Automation scripts, including a real Windows Installer package |
 
 ---
 
 ## ✅ Quality & testing
 
-- **226 automated tests, 0 failing.** They cover the inventory, leftover scanner, safety engine, tracker, WinGet parser, monitor, performance, cleaners, secure delete and more. Every registry test runs in a sandbox key and every file test in a temp folder.
+- **277 automated tests, 0 failing.** They cover the inventory, leftover scanner, safety engine, tracker, WinGet parser, monitor, performance, cleaners, secure delete and more. Every registry test runs in a sandbox key and every file test in a temp folder.
 - **End-to-end UI tests** drive the real app through Windows UI Automation. They cover full uninstalls in all three modes, the install tracker with undo, Hunter mode, WinGet install and uninstall, and live-monitor alerts.
 - **Checked against Windows.** The program list matches Windows' own *Programs and Features* (0 missing), and startup states match Task Manager.
 - **Zero compiler warnings** in Release builds.
@@ -376,6 +376,7 @@ Found a safety or security issue? Please report it privately; see [SECURITY.md](
 - [x] Installation change tracker with undo
 - [x] WinGet integration, performance insights, live monitor, duplicate and orphan finder
 - [x] Post-uninstall verification, 3× faster install snapshots, responsive layout
+- [x] 1.2: per-user MSI detection, correct MSI uninstall (`/X`), exit codes, WinGet and leftover-detection fixes, the `ms-gamingoverlay` link check ([details](docs/BUGFIXES-1.2.md))
 - [ ] Code-signed releases
 - [ ] Publish to WinGet, Scoop and Chocolatey
 - [ ] Translations (the interface is English-only today)
@@ -432,6 +433,12 @@ The release isn't code-signed yet, so SmartScreen may show "Windows protected yo
 </details>
 
 <details>
+<summary><b>Why does Windows say "You'll need a new app to open this ms-gamingoverlay link"?</b></summary>
+
+Xbox Game Bar is not installed, but Windows still opens it through that link (Win+G, a controller's Xbox button, some games). The **Windows apps** page detects this and offers to open Game Bar's Microsoft Store page, or Windows Settings to turn its shortcuts off. Unravel never changes Windows settings for this.
+</details>
+
+<details>
 <summary><b>Does it work on Windows 7 or 8?</b></summary>
 
 No. Unravel needs Windows 10 version 2004 or later, or Windows 11.
@@ -463,6 +470,7 @@ Contributions are welcome: bug reports, fixes, tests and features. Read [CONTRIB
 
 ## 📚 Documentation
 
+- [1.2 bug fixes](docs/BUGFIXES-1.2.md): root causes, evidence and tests for every fix in this release.
 - [New features](docs/NEW_FEATURES.md): the safety engine, tracker, WinGet, performance, duplicates and monitor in depth.
 - [Feature parity matrix](docs/FEATURE_PARITY.md): every feature with its evidence.
 - [Test report](docs/TEST_REPORT.md): automated and end-to-end results, and known limits.

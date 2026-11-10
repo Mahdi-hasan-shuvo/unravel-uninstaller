@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A harmless per-user Windows Installer package for e2e_msi.ps1. Installs one text file and one registry value for the current user. -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Unravel MSI Demo" Manufacturer="Contoso Test Labs" Version="1.0.0.0" Language="1033"
+           UpgradeCode="6F2C0E5A-3D1B-4C77-9A44-0B7D1E0C2A11" ProductCode="7A1D2F60-8B3C-4E55-A1F0-2C9E4B7D3F22" Scope="perUser" Compressed="yes">
+    <MediaTemplate EmbedCab="yes"/>
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="INSTALLFOLDER" Name="UnravelMsiDemo">
+        <Component Id="Main" Guid="8B2E3F71-9C4D-4F66-B201-3DAF5C8E4A33">
+          <RegistryValue Root="HKCU" Key="Software\Contoso Test Labs\Unravel MSI Demo" Name="Installed" Type="integer" Value="1" KeyPath="yes"/>
+          <File Source="MsiDemo.txt" KeyPath="no"/>
+          <RemoveFolder Id="RemoveInstallFolder" On="uninstall"/>
+        </Component>
+      </Directory>
+    </StandardDirectory>
+    <Feature Id="All"><ComponentRef Id="Main"/></Feature>
+  </Package>
+</Wix>

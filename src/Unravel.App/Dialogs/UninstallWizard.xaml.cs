@@ -1,9 +1,11 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using Unravel.App.Infrastructure;
 using Unravel.Core.Leftovers;
+using Unravel.Core.Logging;
+using Unravel.Core.Programs;
 using Unravel.Core.Settings;
 using Unravel.Core.SystemOps;
 using Unravel.Core.Util;
@@ -135,11 +137,19 @@ public partial class UninstallWizard : Window
             case UninstallerOutcome.SkippedWaiting:
                 Log("Continuing without waiting for the uninstaller.", "warn");
                 break;
+            case UninstallerOutcome.Finished when result.Exit is UninstallerExit.Failed or UninstallerExit.Cancelled:
+                Log(result.Message!, result.Exit == UninstallerExit.Failed ? "error" : "warn");
+                break;
+            case UninstallerOutcome.Finished when result.Exit is UninstallerExit.RestartNeeded or UninstallerExit.Unknown:
+                Log(result.Message!, result.Exit == UninstallerExit.RestartNeeded ? "warn" : "info");
+                break;
             default:
                 Log(_job.IsWindowsApp ? "Windows removed the app." : "The built-in uninstaller has finished.", "ok");
                 break;
         }
-        bool still = await Task.Run(_job.StillInstalled);
+        bool still = await IsStillInstalledAsync();
+        ActivityLog.Write(still ? LogLevel.Warning : LogLevel.Action, "Uninstaller", $"Ran the uninstaller of {_job.DisplayName}: {result.Outcome}" +
+            (result.Message is null ? "" : $" – {result.Message.TrimEnd('.')}") + (still ? "; still registered as installed" : "; no longer registered"));
         if (result.Outcome == UninstallerOutcome.Finished || result.Outcome == UninstallerOutcome.SkippedWaiting)
             Log(still ? "The program is still registered as installed. Its uninstaller may have been cancelled or may need a restart to finish."
                       : "The program is no longer registered as installed.", still ? "warn" : "ok");
@@ -157,6 +167,12 @@ public partial class UninstallWizard : Window
     }
 
     private void SkipWait_Click(object sender, RoutedEventArgs e) => _waitCts?.Cancel();
+
+    private async Task<bool> IsStillInstalledAsync()
+    {
+        try { return await Task.Run(_job.StillInstalled); }
+        catch (Exception e) { ActivityLog.Warning("Uninstaller", $"Could not check whether {_job.DisplayName} is still installed: {e.Message}"); return false; }
+    }
 
     // ------------------------------------------------------------ step 2: scan
 
@@ -187,6 +203,11 @@ public partial class UninstallWizard : Window
             Ui.Error("The scan failed", e.Message);
             ShowStep(Step.Uninstall);
             return;
+        }
+        if (await IsStillInstalledAsync())
+        {
+            _result.MarkProgramStillInstalled();
+            Ui.Info("The program is still installed", $"Windows still lists {_job.DisplayName} as installed, so what the scan found is probably the working program, not leftovers. Nothing has been selected and every item is rated Low.");
         }
         RegistryTree.ItemsSource = _result.RegistryRoot.Children;
         FilesGrid.ItemsSource = _result.Files;
@@ -388,7 +409,7 @@ public partial class UninstallWizard : Window
         }
         var recycle = Ui.Settings.Uninstaller.DeleteFilesToRecycleBin;
         if (!DeletionPreviewDialog.Confirm(this, "Delete files and folders", $"These files and folders of {_job.DisplayName} will be deleted.",
-                selected.Select(f => new PreviewItem(f.Location, f.Kind == LeftoverKind.Folder ? "Folder" : "File", f.Safety, f.Size)),
+                selected.Select(f => new PreviewItem(f.Location, f.Kind switch { LeftoverKind.Folder => "Folder", LeftoverKind.ScheduledTask => "Scheduled task", _ => "File" }, f.Safety, f.Size)),
                 "Delete", recycle ? "Items go to the Recycle Bin." : "Items are deleted permanently (Recycle Bin is off in Settings)."))
             return;
         var byLocation = new Dictionary<string, LeftoverNode>(StringComparer.OrdinalIgnoreCase);
@@ -413,7 +434,8 @@ public partial class UninstallWizard : Window
                 (ProcessUtil.IsElevated ? "" : "\n\nFiles in use or in protected folders need administrator rights."));
     }
 
-    private LeftoverNode? SelectedFile => FilesGrid.SelectedItem as LeftoverNode;
+    /// <summary>The selected row, when it is something on disk (scheduled tasks have no file to open).</summary>
+    private LeftoverNode? SelectedFile => FilesGrid.SelectedItem is LeftoverNode { Kind: not LeftoverKind.ScheduledTask } n ? n : null;
     private void FileOpen_Click(object s, RoutedEventArgs e) { if (SelectedFile?.FsPath is { } p) Ui.Try("Open", () => Shell.OpenPath(p)); }
     private void FileFolder_Click(object s, RoutedEventArgs e) { if (SelectedFile?.FsPath is { } p) Ui.Try("Open folder", () => Shell.ShowInExplorer(p)); }
     private void FileProperties_Click(object s, RoutedEventArgs e) { if (SelectedFile?.FsPath is { } p) Ui.Try("Properties", () => Shell.ShowProperties(p)); }

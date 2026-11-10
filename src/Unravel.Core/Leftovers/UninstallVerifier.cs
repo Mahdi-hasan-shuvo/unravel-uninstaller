@@ -145,10 +145,14 @@ public sealed class UninstallVerifier
         return report;
     }
 
-    internal static VerificationCheck CheckRemoved(RemovedItem r)
+    internal static VerificationCheck CheckRemoved(RemovedItem r, Func<string, bool>? taskExists = null)
     {
         switch (r.Kind)
         {
+            case LeftoverKind.ScheduledTask when r.FsPath is not null:
+                return (taskExists ?? Tracking.ScheduledTasks.Exists)(r.FsPath)
+                    ? new(VerificationArea.FileItem, r.Location, VerificationStatus.StillPresent, "The scheduled task still exists.")
+                    : new(VerificationArea.FileItem, r.Location, VerificationStatus.Removed, "Scheduled task deleted.");
             case LeftoverKind.RegistryKey when r.Key is not null:
                 return r.Key.Exists()
                     ? new(VerificationArea.RegistryItem, r.Location, VerificationStatus.StillPresent, "The key exists again (re-created or not deleted).")

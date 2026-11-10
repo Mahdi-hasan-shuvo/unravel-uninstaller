@@ -8,7 +8,7 @@ namespace Unravel.Core.Leftovers;
 
 public enum ScanMode { BuiltInOnly, Safe, Moderate, Advanced }
 
-public enum LeftoverKind { Container, RegistryKey, RegistryValue, Folder, File }
+public enum LeftoverKind { Container, RegistryKey, RegistryValue, Folder, File, ScheduledTask }
 
 /// <summary>
 /// One node in a leftover result tree. Only nodes with <see cref="IsCreated"/> (shown bold) are ever deleted;
@@ -45,7 +45,7 @@ public sealed class LeftoverNode : INotifyPropertyChanged
     {
         LeftoverKind.RegistryKey => Key!.FullPath,
         LeftoverKind.RegistryValue => Key!.FullPath + "\\" + (string.IsNullOrEmpty(ValueName) ? "(Default)" : ValueName),
-        LeftoverKind.Folder or LeftoverKind.File => FsPath!,
+        LeftoverKind.Folder or LeftoverKind.File or LeftoverKind.ScheduledTask => FsPath!,
         _ => DisplayName
     };
 
@@ -145,6 +145,24 @@ public sealed class ScanResult
     public List<Finding> RawFindings { get; init; } = [];
     public List<string> Warnings { get; init; } = [];
     public TimeSpan Duration { get; set; }
+
+    /// <summary>
+    /// The uninstaller failed or was cancelled: what was found is the live program, not leftovers.
+    /// Nothing stays selected and every item is rated Low; the user can still tick an item deliberately.
+    /// </summary>
+    public void MarkProgramStillInstalled()
+    {
+        foreach (var n in RegistryRoot.Descendants().Concat(Files).Where(n => n.IsCreated))
+        {
+            n.Safety = n.Safety with
+            {
+                Confidence = Safety.Confidence.Low,
+                Risks = n.Safety.Risks | Safety.RiskFlags.ProgramStillInstalled,
+                Explanation = n.Safety.Explanation + " The program is still installed, so this may be in use.",
+            };
+            n.IsChecked = false;
+        }
+    }
 
     public IEnumerable<LeftoverNode> RegistryLeftovers => RegistryRoot.Descendants().Where(n => n.IsCreated);
     public int RegistryCount => RegistryLeftovers.Count();

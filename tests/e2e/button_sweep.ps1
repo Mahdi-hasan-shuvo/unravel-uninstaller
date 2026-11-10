@@ -11,6 +11,9 @@ if (-not ('UWClose' -as [type])) { Add-Type 'using System; using System.Runtime.
 $logDir = Join-Path $env:LOCALAPPDATA 'Unravel\Logs'
 $started = Get-Date
 
+# The sweep presses view switches, which the app saves; the user's settings are put back afterwards.
+$settings = Join-Path $env:LOCALAPPDATA 'Unravel\settings.json'
+$savedSettings = if (Test-Path $settings) { [IO.File]::ReadAllBytes($settings) }
 $p = Start-Process $Exe -PassThru
 $w = Wait-For { Get-AppWindow $p.Id "Unravel*" } 60
 Start-Sleep 4
@@ -55,6 +58,7 @@ foreach ($pg in $navNames) {
 }
 $alive = -not $p.HasExited
 Stop-Process -Id $p.Id -Force -EA 0
+if ($savedSettings) { [IO.File]::WriteAllBytes($settings, $savedSettings) }
 
 $results | Format-Table -AutoSize | Out-String -Width 220
 "buttons pressed: $($results.Count); error dialogs: $(@($results | ? Error).Count); app alive at end: $alive"

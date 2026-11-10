@@ -73,11 +73,38 @@ public static class LeftoverRemover
         return chosen.Where(n => !chosen.Any(o => o.Kind == LeftoverKind.Folder && !ReferenceEquals(o, n) && FileOps.IsSameOrUnder(n.FsPath!, o.FsPath!) && !n.FsPath!.Equals(o.FsPath, StringComparison.OrdinalIgnoreCase))).ToList();
     }
 
-    public static RemovalReport DeleteFiles(IEnumerable<LeftoverNode> files, bool toRecycleBin, bool scheduleLocked = true, string title = "Leftovers")
+    /// <summary>How scheduled tasks are exported and deleted (replaceable in tests).</summary>
+    public sealed record TaskOperations(Func<string, string> ExportXml, Action<string> Delete)
+    {
+        public static readonly TaskOperations Default = new(Tracking.ScheduledTasks.GetXml, Tracking.ScheduledTasks.Delete);
+    }
+
+    private static RemovalItemResult DeleteTask(LeftoverNode task, string backupFolder, TaskOperations ops)
+    {
+        try
+        {
+            var xml = ops.ExportXml(task.FsPath!);
+            Directory.CreateDirectory(backupFolder);
+            var name = string.Concat(task.FsPath!.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)).Trim('_');
+            File.WriteAllText(Path.Combine(backupFolder, name + ".xml"), xml, Encoding.Unicode);
+        }
+        catch (Exception e) { return new(task.Location, false, "Skipped: the task could not be backed up. " + e.Message, DeleteOutcome.Failed); }
+        try
+        {
+            ops.Delete(task.FsPath!);
+            return new(task.Location, true, null, DeleteOutcome.Deleted);
+        }
+        catch (Exception e) { return new(task.Location, false, e.Message, DeleteOutcome.Failed); }
+    }
+
+    public static RemovalReport DeleteFiles(IEnumerable<LeftoverNode> files, bool toRecycleBin, bool scheduleLocked = true, string title = "Leftovers",
+        string? taskBackupFolder = null, TaskOperations? taskOps = null)
     {
         var report = new RemovalReport();
+        taskBackupFolder ??= Path.Combine(Settings.SettingsStore.DefaultFolder, "Backups", $"{DateTime.Now:yyyyMMdd-HHmmss}-Scheduled tasks");
         foreach (var f in SelectFiles(files).OrderByDescending(f => f.FsPath!.Length))
         {
+            if (f.Kind == LeftoverKind.ScheduledTask) { report.Items.Add(DeleteTask(f, taskBackupFolder, taskOps ?? TaskOperations.Default)); continue; }
             var r = FileOps.Delete(f.FsPath!, toRecycleBin, scheduleLocked);
             report.Items.Add(new(f.Location, r.Succeeded, r.Error, r.Outcome));
         }

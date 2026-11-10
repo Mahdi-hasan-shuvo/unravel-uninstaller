@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
 using Unravel.Core.SystemOps;
 using Unravel.Core.Util;
 
@@ -8,12 +9,17 @@ namespace Unravel.Core.Programs;
 
 public enum UninstallCommandKind { Standard, ForcedMsi, Modify, Repair }
 
+public enum UninstallerExit { Success, Cancelled, Failed, RestartNeeded, Unknown }
+
+public sealed record UninstallerExitInfo(UninstallerExit Kind, string Message);
+
 public static class ProgramActions
 {
     /// <summary>Builds the command line for an action, or throws when the program does not support it.</summary>
     public static string GetCommand(InstalledProgram p, UninstallCommandKind kind) => kind switch
     {
-        UninstallCommandKind.Standard => !string.IsNullOrWhiteSpace(p.UninstallString) ? p.UninstallString!
+        UninstallCommandKind.Standard => IsMsiInstallCommand(p) ? $"MsiExec.exe /X{p.MsiProductCode}"
+            : !string.IsNullOrWhiteSpace(p.UninstallString) ? p.UninstallString!
             : p.MsiProductCode is { } code ? $"MsiExec.exe /X{code}"
             : throw new InvalidOperationException("This program does not provide an uninstall command."),
         UninstallCommandKind.ForcedMsi => p.MsiProductCode is { } c2 ? $"MsiExec.exe /X{c2}"
@@ -25,6 +31,34 @@ public static class ProgramActions
             : throw new InvalidOperationException("This program does not support Repair."),
         _ => throw new ArgumentOutOfRangeException(nameof(kind))
     };
+
+    /// <summary>
+    /// Windows Installer registers most products as "MsiExec /I{code}", which is its install and maintenance switch: depending
+    /// on the package it opens a Change/Repair screen or simply runs the install again. Only /X uninstalls.
+    /// </summary>
+    private static bool IsMsiInstallCommand(InstalledProgram p) =>
+        p.MsiProductCode is not null && p.UninstallString is { } u &&
+        Regex.IsMatch(u, @"msiexec(\.exe)?""?\s+.*?/i\s*\{", RegexOptions.IgnoreCase);
+
+    /// <summary>Explains an uninstaller's exit code. Only Windows Installer documents its codes; others are reported as they are.</summary>
+    public static UninstallerExitInfo InterpretExitCode(int code, bool isWindowsInstaller)
+    {
+        if (code == 0) return new(UninstallerExit.Success, "The uninstaller reported success.");
+        if (!isWindowsInstaller) return new(UninstallerExit.Unknown, $"The uninstaller finished with exit code {code}.");
+        return code switch
+        {
+            1602 => new(UninstallerExit.Cancelled, "The uninstall was cancelled."),
+            1603 => new(UninstallerExit.Failed, "Windows Installer hit a fatal error (1603) and did not finish the uninstall."),
+            1605 => new(UninstallerExit.Failed, "Windows Installer no longer knows this product (1605). Its entry may be left over from an earlier removal."),
+            1618 => new(UninstallerExit.Failed, "Another installation is in progress (1618). Wait for it to finish, then try again."),
+            1612 => new(UninstallerExit.Failed, "The product's installation source is missing (1612), so Windows Installer could not remove it."),
+            1619 or 1620 => new(UninstallerExit.Failed, $"Windows Installer could not open the product's package ({code})."),
+            1925 => new(UninstallerExit.Failed, "Administrator rights are needed to remove this product (1925)."),
+            1641 => new(UninstallerExit.RestartNeeded, "The uninstall succeeded and Windows is restarting to finish it."),
+            3010 => new(UninstallerExit.RestartNeeded, "The uninstall succeeded. Restart Windows to finish it."),
+            _ => new(UninstallerExit.Failed, $"Windows Installer finished with error {code}."),
+        };
+    }
 
     /// <summary>Starts the command. Programs registered for all users usually need elevation for their uninstaller.</summary>
     public static Process StartCommand(InstalledProgram p, UninstallCommandKind kind)
@@ -49,6 +83,8 @@ public static class ProgramActions
     /// <summary>Removes the program's entry from the installed programs list without uninstalling anything. A .reg backup is written first.</summary>
     public static (bool Ok, string? Error, string? BackupFile) RemoveEntry(InstalledProgram p, RegistryBackup? backup)
     {
+        if (p.IsWindowsInstallerRecord)
+            return (false, "This entry is Windows Installer's own record of the program. Deleting it would damage Windows Installer's database, so only an uninstall may remove it.", null);
         string? file = null;
         if (backup is not null)
         {

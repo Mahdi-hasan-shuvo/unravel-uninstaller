@@ -79,6 +79,26 @@ public static class ScheduledTasks
         return m.Success ? System.Net.WebUtility.HtmlDecode(m.Groups[1].Value) : null;
     }
 
+    public static string GetXml(string path)
+    {
+        var (folderPath, name) = Split(path);
+        dynamic folder = Connect().GetFolder(folderPath);
+        return (string)folder.GetTask(name).Xml;
+    }
+
+    /// <summary>Whether the task exists. A task that can't be read is reported as existing, so nothing claims it is gone.</summary>
+    public static bool Exists(string path)
+    {
+        try
+        {
+            var (folderPath, name) = Split(path);
+            dynamic folder = Connect().GetFolder(folderPath);
+            return folder.GetTask(name) is not null;
+        }
+        catch (Exception e) when ((uint)e.HResult is 0x80070002 or 0x80070003) { return false; }
+        catch { return true; }
+    }
+
     public static void Delete(string path)
     {
         var svc = Connect();

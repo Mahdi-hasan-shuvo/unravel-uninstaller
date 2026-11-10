@@ -40,6 +40,8 @@ public sealed class LeftoverScanner
         public readonly HashSet<string> Seen = new(StringComparer.OrdinalIgnoreCase);
         public readonly List<string> Warnings = [];
         public string? Folder => Target.InstallFolder;
+        /// <summary>Folders of other installed programs at or inside this program's folder: what is in them belongs to those programs.</summary>
+        public List<string> FoldersOfOthers { get; init; } = [];
         public HashSet<string> ExeNames => _exeNames ??= Target.Executables.Select(Path.GetFileName).Where(n => n is not null).Select(n => n!).ToHashSet(StringComparer.OrdinalIgnoreCase);
         private HashSet<string>? _exeNames;
     }
@@ -56,6 +58,10 @@ public sealed class LeftoverScanner
                 .Where(o => !o.Name.Equals(target.DisplayName, StringComparison.OrdinalIgnoreCase))
                 .SelectMany(o => new[] { NameMatcher.Normalize(o.Name), NameMatcher.Normalize(NameMatcher.StripVersion(o.Name)) })
                 .Where(n => n.Length >= 3).ToHashSet(),
+            FoldersOfOthers = target.InstallFolder is { } own && !ScanTarget.IsBroadFolder(own)
+                ? _env.OtherPrograms.Where(o => !string.IsNullOrEmpty(o.Folder) && !o.Name.Equals(target.DisplayName, StringComparison.OrdinalIgnoreCase) && FileOps.IsSameOrUnder(o.Folder, own))
+                    .Select(o => o.Folder).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+                : [],
         };
 
         if (mode != ScanMode.BuiltInOnly)
@@ -64,7 +70,7 @@ public sealed class LeftoverScanner
             Step(ctx, "Scanning registry: program keys", ScanUninstallKey, ScanSoftwareRoots, ScanMsi);
             if (mode >= ScanMode.Moderate)
                 Step(ctx, "Scanning registry: startup, app paths, services", ScanRunKeys, ScanAppPaths, ScanServices, ScanApplicationsClasses,
-                    ScanSharedDlls, ScanFirewall, ScanMuiCache);
+                    ScanSharedDlls, ScanFirewall, ScanMuiCache, ScanScheduledTasks);
             if (mode >= ScanMode.Advanced)
                 Step(ctx, "Scanning registry: deep search and COM registrations", ScanSoftwareDeep, ScanCom, ScanMsiComponents);
             Step(ctx, "Scanning registry: Windows app data", ScanAppModel);
@@ -76,7 +82,7 @@ public sealed class LeftoverScanner
         var result = new ScanResult
         {
             RegistryRoot = BuildRegistryTree(ctx.Findings.Where(f => f.Kind is LeftoverKind.RegistryKey or LeftoverKind.RegistryValue)),
-            Files = BuildFileList(ctx.Findings.Where(f => f.Kind is LeftoverKind.Folder or LeftoverKind.File),
+            Files = BuildFileList(ctx.Findings.Where(f => f.Kind is LeftoverKind.Folder or LeftoverKind.File or LeftoverKind.ScheduledTask),
                 SafetyEngine.Context.Capture(target.Publisher?.Contains("Microsoft", StringComparison.OrdinalIgnoreCase) == true), ct),
             RawFindings = ctx.Findings,
             Warnings = ctx.Warnings,
@@ -189,6 +195,7 @@ public sealed class LeftoverScanner
     {
         if (string.IsNullOrWhiteSpace(path)) return false;
         path = path.Trim().Trim('"');
+        if (ctx.FoldersOfOthers.Any(o => FileOps.IsSameOrUnder(path, o))) return false;
         if (ctx.Folder is { } f && !ScanTarget.IsBroadFolder(f) && FileOps.IsSameOrUnder(path, f)) return true;
         return ctx.Target.Executables.Any(e => e.Equals(path, StringComparison.OrdinalIgnoreCase));
     }
@@ -361,8 +368,34 @@ public sealed class LeftoverScanner
             foreach (var exe in ctx.ExeNames)
             {
                 var kp = root.Child("Applications").Child(exe);
-                if (kp.Exists()) AddKey(ctx, kp, "File association application entry");
+                // Many programs ship a java.exe or python.exe: the entry counts only if its command runs this program's file.
+                if (ApplicationCommands(kp).Any(c => IsInTarget(ctx, CommandLine.FindExecutablePath(c))))
+                    AddKey(ctx, kp, "File association application entry");
             }
+    }
+
+    private static List<string> ApplicationCommands(RegPath applicationKey)
+    {
+        var commands = new List<string>();
+        var shell = applicationKey.Child("shell");
+        foreach (var verb in SubKeys(shell))
+        {
+            using var k = shell.Child(verb).Child("command").Open();
+            if (k is not null && RegistryUtil.GetString(k, "") is { } c) commands.Add(c);
+        }
+        return commands;
+    }
+
+    private void ScanScheduledTasks(Ctx ctx)
+    {
+        if (_env.ScheduledTaskSource is null || (ctx.Folder is null && ctx.Target.Executables.Count == 0)) return;
+        foreach (var t in _env.ScheduledTaskSource())
+        {
+            ctx.Ct.ThrowIfCancellationRequested();
+            if (t.Path.StartsWith(@"\Microsoft\", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!t.Actions.Any(a => IsInTarget(ctx, CommandLine.FindExecutablePath(a)))) continue;
+            if (ctx.Seen.Add("T:" + t.Path)) ctx.Findings.Add(new Finding(LeftoverKind.ScheduledTask, "Scheduled task that runs the program", true, FsPath: t.Path));
+        }
     }
 
     private void ScanSharedDlls(Ctx ctx)
@@ -698,6 +731,7 @@ public sealed class LeftoverScanner
         ("File association application entry", FindingCategory.FileAssociation),
         ("Shared DLL reference count", FindingCategory.SharedDll),
         ("Windows Firewall rule", FindingCategory.FirewallRule),
+        ("Scheduled task that runs the program", FindingCategory.ScheduledTask),
         ("Program name cache", FindingCategory.NameCache),
         ("Key name matches the program (deep search)", FindingCategory.DeepNameMatch),
         ("COM class registered by the program", FindingCategory.ComRegistration),
@@ -751,6 +785,15 @@ public sealed class LeftoverScanner
         var result = new ObservableCollection<LeftoverNode>();
         foreach (var f in list)
         {
+            if (f.Kind == LeftoverKind.ScheduledTask)
+            {
+                var task = new LeftoverNode(f.Kind, f.FsPath!) { FsPath = f.FsPath, Reason = f.Reason, Category = CategoryFor(f.Reason) };
+                task.IsCreated = f.Created;
+                task.Safety = SafetyEngine.AssessScheduledTask(f.FsPath!, f.Created);
+                task.IsChecked = _checkByDefault && f.Created && task.Safety.IsSafeToAutoSelect;
+                result.Add(task);
+                continue;
+            }
             if (createdFolders.Any(cf => !cf.Equals(f.FsPath, StringComparison.OrdinalIgnoreCase) && FileOps.IsSameOrUnder(f.FsPath!, cf))) continue;
             var node = new LeftoverNode(f.Kind, f.FsPath!)
             {

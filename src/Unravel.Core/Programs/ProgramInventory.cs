@@ -5,7 +5,8 @@ using Unravel.Core.Util;
 
 namespace Unravel.Core.Programs;
 
-public sealed record UninstallSource(RegPath Root, InstallScope Scope, bool Is64Bit);
+/// <param name="IsMsiUserData">The root holds Windows Installer's per-user records ({packed code}\InstallProperties) instead of Uninstall keys.</param>
+public sealed record UninstallSource(RegPath Root, InstallScope Scope, bool Is64Bit, bool IsMsiUserData = false);
 
 public sealed class InventoryOptions
 {
@@ -35,23 +36,49 @@ public sealed class ProgramInventory
         if (Environment.Is64BitOperatingSystem)
             list.Add(new(new RegPath(RegistryHive.LocalMachine, UninstallSubPath, RegistryView.Registry32), InstallScope.AllUsers, false));
         list.Add(new(new RegPath(RegistryHive.CurrentUser, UninstallSubPath, RegistryView.Registry64), InstallScope.CurrentUser, Environment.Is64BitOperatingSystem));
+        // Per-user Windows Installer products have no Uninstall key at all; Windows lists them from this record.
+        var currentSid = System.Security.Principal.WindowsIdentity.GetCurrent().User?.Value;
+        if (currentSid is not null)
+            list.Add(new(new RegPath(RegistryHive.LocalMachine, $@"SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\UserData\{currentSid}\Products", RegistryView.Registry64),
+                InstallScope.CurrentUser, Environment.Is64BitOperatingSystem, IsMsiUserData: true));
+        // HKCU is not redirected for 32-bit programs, but some installers write to its WOW6432Node path explicitly.
+        list.Add(new(new RegPath(RegistryHive.CurrentUser, @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall", RegistryView.Registry64), InstallScope.CurrentUser, false));
+        // Hives of other signed-in users are loaded and readable when elevated (e.g. UAC with a different admin account).
+        foreach (var sid in OtherUserSids(LoadedHives(), currentSid))
+            list.Add(new(new RegPath(RegistryHive.Users, sid + "\\" + UninstallSubPath, RegistryView.Registry64), InstallScope.OtherUser, Environment.Is64BitOperatingSystem));
         return list;
     }
+
+    private static string[] LoadedHives()
+    {
+        try { return Registry.Users.GetSubKeyNames(); } catch { return []; }
+    }
+
+    internal static IReadOnlyList<string> OtherUserSids(IEnumerable<string> hives, string? currentSid) =>
+        hives.Where(h => h.StartsWith("S-1-5-21-", StringComparison.OrdinalIgnoreCase) && !h.EndsWith("_Classes", StringComparison.OrdinalIgnoreCase) &&
+                         !h.Equals(currentSid, StringComparison.OrdinalIgnoreCase)).ToList();
 
     public List<InstalledProgram> Load(InventoryOptions options)
     {
         var result = new List<InstalledProgram>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var source in Sources)
+        // Uninstall keys come first: a Windows Installer record only adds a product that has no key of its own.
+        var knownKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var source in Sources.OrderBy(s => s.IsMsiUserData))
         {
             using var root = source.Root.Open();
             if (root is null) continue;
             foreach (var name in SafeSubKeyNames(root))
             {
-                using var key = TryOpen(root, name);
+                string? productCode = null;
+                if (source.IsMsiUserData && !TryUnpackProductCode(name, out productCode)) continue;
+                if (productCode is not null && knownKeys.Contains(productCode)) continue;
+                var relative = source.IsMsiUserData ? name + "\\InstallProperties" : name;
+                using var key = TryOpen(root, relative);
                 if (key is null) continue;
-                var program = Read(key, source.Root.Child(name), source, options);
+                var program = Read(key, source.Root.Child(relative), source, options, productCode);
                 if (program is null) continue;
+                knownKeys.Add(program.KeyName);
                 if (!Include(program, options)) continue;
                 // The same product can be registered in both views (rare) – keep the first occurrence.
                 var identity = $"{program.DisplayName}|{program.Version}|{program.Scope}|{program.KeyName}";
@@ -69,6 +96,12 @@ public sealed class ProgramInventory
         _ => true
     };
 
+    private static bool TryUnpackProductCode(string packed, out string? code)
+    {
+        try { code = Leftovers.MsiGuid.Unpack(packed); return true; }
+        catch (FormatException) { code = null; return false; }
+    }
+
     private static IEnumerable<string> SafeSubKeyNames(RegistryKey k)
     {
         try { return k.GetSubKeyNames(); } catch { return []; }
@@ -79,7 +112,7 @@ public sealed class ProgramInventory
         try { return root.OpenSubKey(name); } catch { return null; }
     }
 
-    internal static InstalledProgram? Read(RegistryKey key, RegPath path, UninstallSource source, InventoryOptions options)
+    internal static InstalledProgram? Read(RegistryKey key, RegPath path, UninstallSource source, InventoryOptions options, string? productCode = null)
     {
         var name = ResolveDisplayName(key, path.Name);
         if (string.IsNullOrWhiteSpace(name)) return null;
@@ -107,6 +140,8 @@ public sealed class ProgramInventory
         {
             DisplayName = name,
             RegistryKey = path,
+            KeyNameOverride = productCode,
+            IsWindowsInstallerRecord = source.IsMsiUserData,
             Version = RegistryUtil.GetString(key, "DisplayVersion"),
             Publisher = RegistryUtil.GetString(key, "Publisher"),
             InstallLocation = RegistryUtil.GetString(key, "InstallLocation") ?? RegistryUtil.GetString(key, "Inno Setup: App Path"),

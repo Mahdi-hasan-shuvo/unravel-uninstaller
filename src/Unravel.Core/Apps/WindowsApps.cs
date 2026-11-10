@@ -54,19 +54,18 @@ public static class WindowsApps
     {
         var pm = new PackageManager();
         var result = new List<WindowsApp>();
+        var nonRemovable = NonRemovablePackages();
         foreach (var pkg in pm.FindPackagesForUser(""))
         {
             try
             {
                 if (pkg.IsResourcePackage) continue;
                 if (pkg.IsFramework && !options.IncludeFrameworks) continue;
-                var sig = pkg.SignatureKind;
-                var isSystem = sig == PackageSignatureKind.System;
-                // Stub packages (e.g. Clock, To Do on some editions) are real, removable apps and are listed.
-                if (isSystem && !options.IncludeSystemApps) continue;
                 if (pkg.Status.NotAvailable) continue;
-                var app = FromPackage(pkg);
-                if (app.IsNonRemovable && !options.IncludeSystemApps) continue;
+                // Stub packages (e.g. Clock, To Do on some editions) are real, removable apps and are listed.
+                var app = FromPackage(pkg, nonRemovable);
+                // Parts of Windows the user can start (Settings, Windows Security) are listed; invisible plumbing is not.
+                if (app.IsSystem && !app.CanLaunch && !options.IncludeSystemApps) continue;
                 result.Add(app);
             }
             catch { /* packages in a broken state can throw on property access – skip them */ }
@@ -74,7 +73,50 @@ public static class WindowsApps
         return result.OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
     }
 
-    private static WindowsApp FromPackage(Package pkg)
+    private static HashSet<string>? _nonRemovable;
+
+    /// <summary>
+    /// Packages Windows refuses to remove. WinRT's Package class doesn't expose this; Get-AppxPackage does.
+    /// When PowerShell can't answer, the set is empty and Windows' own refusal at removal time remains the safeguard.
+    /// </summary>
+    private static HashSet<string> NonRemovablePackages()
+    {
+        if (_nonRemovable is { } known) return known;
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var exe = Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\powershell.exe");
+            var psi = new ProcessStartInfo(exe, "-NoProfile -NonInteractive -Command \"Get-AppxPackage | Where-Object NonRemovable | ForEach-Object PackageFullName\"")
+            {
+                UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true,
+            };
+            using var p = Process.Start(psi);
+            if (p is null) return set;
+            var read = p.StandardOutput.ReadToEndAsync();
+            if (!p.WaitForExit(20_000)) { try { p.Kill(); } catch { } return set; }
+            foreach (var line in read.Result.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)) set.Add(line.Trim());
+            if (p.ExitCode == 0 && set.Count > 0) _nonRemovable = set;
+        }
+        catch (Exception e) { Logging.ActivityLog.Warning("Windows apps", "Could not read which packages are non-removable: " + e.Message); }
+        return set;
+    }
+
+    /// <summary>Link schemes (protocols) the package declares in its manifest.</summary>
+    public static List<string> ReadProtocols(string? installLocation)
+    {
+        if (installLocation is null) return [];
+        try
+        {
+            var path = Path.Combine(installLocation, "AppxManifest.xml");
+            if (!File.Exists(path)) return [];
+            return System.Xml.Linq.XDocument.Load(path).Descendants().Where(e => e.Name.LocalName == "Protocol")
+                .Select(e => e.Attribute("Name")?.Value).Where(n => !string.IsNullOrWhiteSpace(n)).Select(n => n!)
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        }
+        catch { return []; }
+    }
+
+    private static WindowsApp FromPackage(Package pkg, HashSet<string> nonRemovablePackages)
     {
         string? location = null;
         try { location = pkg.InstalledLocation?.Path; } catch { }
@@ -94,8 +136,8 @@ public static class WindowsApps
         // Users know apps by their Start menu name ("Calculator"), not the package name ("Windows Calculator").
         var name = FirstUsable(entryName, ManifestAppName(location, pkg.Id.FullName, pkg.Id.Name), SafeString(() => pkg.DisplayName)) ?? pkg.Id.Name;
         var v = pkg.Id.Version;
-        bool nonRemovable = false;
-        try { nonRemovable = pkg.SignatureKind == PackageSignatureKind.System || IsNonRemovable(pkg); } catch { }
+        bool nonRemovable = nonRemovablePackages.Contains(pkg.Id.FullName);
+        try { nonRemovable |= pkg.SignatureKind == PackageSignatureKind.System; } catch { }
         return new WindowsApp
         {
             Name = name,
@@ -145,17 +187,6 @@ public static class WindowsApps
         catch { return null; }
     }
 
-    private static bool IsNonRemovable(Package pkg)
-    {
-        // Package.IsNonRemovable is only exposed through the PowerShell module on older SDKs; probe via reflection-free WinRT property if present.
-        try
-        {
-            var prop = pkg.GetType().GetProperty("IsNonRemovable");
-            return prop?.GetValue(pkg) is true;
-        }
-        catch { return false; }
-    }
-
     private static string? SafeString(Func<string> f)
     {
         try
@@ -186,6 +217,7 @@ public static class WindowsApps
     /// <summary>Removes the package for the current user.</summary>
     public static async Task UninstallAsync(WindowsApp app, IProgress<double>? progress = null, CancellationToken ct = default)
     {
+        if (app.IsNonRemovable) throw new InvalidOperationException($"\"{app.Name}\" is part of Windows and can't be removed.");
         var pm = new PackageManager();
         var op = pm.RemovePackageAsync(app.PackageFullName);
         op.Progress = (_, p) => progress?.Report(p.percentage);

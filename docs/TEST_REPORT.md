@@ -5,6 +5,21 @@
 **Rights:** tests ran as a standard user (not elevated). The original Revo Uninstaller 2.6.8 was open,
 elevated, on the same desktop.
 
+## Update 1.2: bug investigation (detection, uninstaller, WinGet, Game Bar link)
+
+| Suite | Result |
+|---|---|
+| Release build | **0 warnings, 0 errors** |
+| Automated tests | **277 passed, 0 failed**, 6 skipped (four opt-in diagnostics with `UNRAVEL_DIAG=1`, the diagnostic dump, the opt-in live WinGet test) |
+| Real Windows Installer package (`e2e_msi.ps1`, `MsiDemo.wxs`) | The registered `MsiExec /I{code}` exits 0 and leaves the product installed. Unravel lists the per-user product, its wizard runs `MsiExec /X{code}`: **No** is reported as "cancelled, still registered as installed"; **Yes** removes the product and its file ("reported success, no longer registered") |
+| Scheduled-task leftover (demo program + a real task) | Found in the Moderate scan, exported to XML before deletion, deleted, verification 9/9 removed |
+| WinGet list on this PC | 225 of 225 rows parsed (215 before; the 10 missing ones had spaces in their IDs) |
+| Windows apps | 71 apps listed (Settings, Get Started and Click to Do now included); the `ms-gamingoverlay` notice appears because Windows reports the link as not supported |
+| Button sweep / layout | 37 buttons, 0 errors, no crash |
+| Read-only audits | Every program and package registered on the PC is listed; 8,564 leftover findings across 112 programs checked for cross-program claims (two classes fixed) |
+
+Details, root causes and sources: [BUGFIXES-1.2.md](BUGFIXES-1.2.md). Not tested: a real Windows 10 installation, and paths that need administrator rights.
+
 ## Update 1.1: verification, speed, responsiveness
 
 | Suite | Result |
